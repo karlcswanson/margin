@@ -96,6 +96,13 @@ def _windows_ips() -> set[str]:
         return set()
 
 
+def _cn(name: str) -> str:
+    """A certificate's common name holds at most 64 bytes of UTF-8; long computer names are cut."""
+    while len(name.encode()) > 64:
+        name = name[:-1]
+    return name
+
+
 def ensure(ws: WorkspaceConfig) -> Certs:
     """The CA (made once) and a server certificate for this computer's current
     names and addresses (remade when they change or it nears expiry)."""
@@ -110,7 +117,7 @@ def ensure(ws: WorkspaceConfig) -> Certs:
         now = dt.datetime.now(dt.timezone.utc)
         san = [x509.DNSName(n) for n in names] + [x509.IPAddress(ipaddress.ip_address(i)) for i in ips]
         cert = (x509.CertificateBuilder()
-                .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"margind {ws.name}")]))
+                .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, _cn(f"margind {ws.name}"))]))
                 .issuer_name(ca.subject)
                 .public_key(key.public_key())
                 .serial_number(x509.random_serial_number())
@@ -142,7 +149,7 @@ def _ca(d: Path, ws: WorkspaceConfig, names: list[str]) -> tuple[ec.EllipticCurv
     key = ec.generate_private_key(ec.SECP256R1())
     now = dt.datetime.now(dt.timezone.utc)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,
-                                            f"Margin local CA · {ws.name} on {socket.gethostname().split('.')[0]}")])
+                                            _cn(f"Margin local CA · {ws.name} on {socket.gethostname().split('.')[0]}"))])
     permitted = ([x509.DNSName(n) for n in sorted({"localhost", "local", *ws.tls_names})]
                  + [x509.IPAddress(n) for n in PRIVATE_NETS])
     ca = (x509.CertificateBuilder()

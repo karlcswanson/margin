@@ -162,3 +162,11 @@ def test_finds_the_claude_chat_that_started_a_server():
     }
     assert _started_by_claude(300, procs) == {"claude_command": "npm run dev -- --host '0.0.0.0'", "claude_session": sid}
     assert _started_by_claude(400, procs) == {}
+
+
+def test_ca_name_fits_with_a_long_computer_name(tmp_path, monkeypatch):
+    from margind import tls
+    from margind.config import WorkspaceConfig
+    monkeypatch.setattr(tls.socket, "gethostname", lambda: "Some-Very-Long-Runner-Host-Name-That-Goes-On-And-On-1234567890.local")
+    ws = WorkspaceConfig(name="A workspace with a fairly long name", tokens=["t"], state_dir=str(tmp_path))
+    assert tls.ensure(ws).ca_sha256
