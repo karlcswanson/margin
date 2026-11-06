@@ -20,9 +20,9 @@ jobs:
         working-directory: daemon
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: ${{ matrix.python }}
       # The tests drive a fake Agent SDK client: no Claude Code login needed.
-      - run: pip install -e ".[dev]"
-      - run: pytest -q
+      - run: uv sync --locked --all-extras
+      - run: uv run pytest -q

@@ -142,6 +142,6 @@ targets:
         NSSpeechRecognitionUsageDescription: Margin turns your voice into text on this device.
         NSLocalNetworkUsageDescription: Margin connects to Claude Code hosts on your private network.
         NSAppTransportSecurity:
-          # HTTPS is required for hosts (see README: Caddy + DNS challenge).
-          # Local networking stays allowed so the Simulator can reach http://127.0.0.1.
+          # Plain HTTP only to IP addresses and .local names (LANs, VPN addresses,
+          # the Simulator's 127.0.0.1); anything else needs HTTPS (a tunnel or proxy).
           NSAllowsLocalNetworking: true

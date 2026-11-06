@@ -2,8 +2,7 @@
 # when you log on and starts it again if it stops.
 #
 # Once, in daemon\ (Python 3.11 or newer):
-#   py -3 -m venv .venv
-#   .venv\Scripts\pip install -e .            # pywinpty and psutil come with it on Windows
+#   uv sync --all-extras                      # pywinpty and psutil come with it on Windows
 #   .venv\Scripts\margind token               # a device token for the TOML's `tokens`
 #   copy workspaces\main.example.toml workspaces\main.toml   # then edit it
 #

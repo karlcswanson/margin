@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> None:
             qr.add_data(link)
             qr.print_ascii(invert=True)
         except ImportError:
-            print("\n(pip install qrcode to show a scannable QR code here)", file=sys.stderr)
+            print("\n(uv sync --extra qr to show a scannable QR code here)", file=sys.stderr)
         return
 
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(name)s %(levelname)s %(message)s")

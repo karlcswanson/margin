@@ -2,7 +2,7 @@
 
 Payloads carry only a short title/body and ids; the app fetches content over
 ZeroTier when opened. Needs an APNs auth key (.p8) from your developer
-account and `pip install "margind[push]"`.
+account and the `push` extra (`uv sync --extra push`).
 """
 from __future__ import annotations
 

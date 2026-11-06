@@ -78,33 +78,37 @@ logged in.
 
 macOS / Linux:
 
+With [uv](https://docs.astral.sh/uv/) (it installs Python too if needed):
+
 ```bash
 git clone https://github.com/karlcswanson/margin.git && cd margin/daemon
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[push,qr]"
+uv sync --all-extras                           # .venv with the locked versions
 
 mkdir -p ~/.margin
-margind token >> ~/.margin/main.tokens      # one line per device
+uv run margind token >> ~/.margin/main.tokens  # one line per device
 cp workspaces/main.example.toml workspaces/main.toml
 # edit main.toml: your projects, bind address, colour
 
-margind serve -c workspaces/main.toml       # port 8787
+uv run margind serve -c workspaces/main.toml   # port 8787
 ```
 
 Windows (PowerShell):
 
 ```powershell
 git clone https://github.com/karlcswanson/margin.git; cd margin\daemon
-py -3 -m venv .venv; .venv\Scripts\Activate.ps1
-pip install -e ".[push,qr]"
+uv sync --all-extras
 
 mkdir $HOME\.margin -Force
-margind token | Out-File -Append -Encoding ascii $HOME\.margin\main.tokens
+uv run margind token | Out-File -Append -Encoding ascii $HOME\.margin\main.tokens
 copy workspaces\main.example.toml workspaces\main.toml
 # edit main.toml (paths like C:/src/my-app work)
 
-margind serve -c workspaces\main.toml
+uv run margind serve -c workspaces\main.toml
 ```
+
+`--all-extras` adds push notifications (`push`) and QR codes for pairing
+(`qr`). Without uv: `python3 -m venv .venv`, then
+`.venv/bin/pip install -e ".[push,qr]"`.
 
 On the computer itself, `http://127.0.0.1:8787/` shows what's running, with
 **Open in…** (your editors) and **Folder** for each project. To keep the
@@ -118,15 +122,15 @@ HTTP with a token on every request, and how your iPad reaches it is up to you:
 
 - **Your LAN**, at home or in the office.
 - **A VPN**: Tailscale, ZeroTier, NetBird, WireGuard, UniFi Teleport.
-- **A tunnel**: ngrok, Cloudflare Tunnel.
-- **A reverse proxy** with HTTPS on a name you own (`deploy/Caddyfile` is an example).
+- **A tunnel or reverse proxy**: ngrok, Cloudflare Tunnel, or your own proxy
+  with HTTPS on a name you own.
 
 Set `bind` in the workspace TOML to where it should listen (`0.0.0.0` for
 every interface, or `127.0.0.1` behind a tunnel or proxy), then make a
 pairing link with the address the iPad will use:
 
 ```bash
-margind pair -c workspaces/main.toml --url http://100.101.102.103:8787
+uv run margind pair -c workspaces/main.toml --url http://100.101.102.103:8787
 ```
 
 It prints a `margin://add?…` link and, with the `qr` extra, a QR code. Scan it
@@ -194,7 +198,7 @@ sidesteps the question.
 ## Development
 
 ```bash
-cd daemon && pip install -e ".[dev]" && pytest -q    # a fake SDK client: no Claude login needed
+cd daemon && uv run pytest -q    # a fake SDK client: no Claude login needed
 ```
 
 The tests run on macOS, Linux and Windows in CI (`.github/workflows/daemon.yml`).
