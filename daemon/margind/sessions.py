@@ -242,7 +242,7 @@ class LiveSession:
                 "UserPromptSubmit": [HookMatcher(hooks=[self._remind_remote])],
             },
             model=self.model,
-            mcp_servers={"margin": create_sdk_mcp_server("margin", tools=self.margin_tools())},
+            mcp_servers={"margin": self._margin_server()},
             allowed_tools=list(MARGIN_TOOLS),
         )
         if self.effort:
@@ -254,6 +254,13 @@ class LiveSession:
         return opts
 
     # -- Margin's tools for Claude --------------------------------------
+    def _margin_server(self) -> Any:
+        server = create_sdk_mcp_server("margin", tools=self.margin_tools())
+        # Loaded with the session, not deferred behind tool search: they're few
+        # and small, and Claude should reach for them without looking them up.
+        server["alwaysLoad"] = True  # type: ignore[typeddict-unknown-key]
+        return server
+
     def margin_tools(self) -> list[Any]:
         mgr, sess = self.mgr, self
 

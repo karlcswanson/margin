@@ -341,6 +341,7 @@ def test_claude_publishes_pages_for_its_project():
             publish, unpublish = tools["publish_page"], tools["unpublish_page"]
             opts = sess.options()
             assert "margin" in opts.mcp_servers and "mcp__margin__publish_page" in opts.allowed_tools
+            assert opts.mcp_servers["margin"]["alwaysLoad"] is True        # not deferred behind tool search
 
             r = await publish.handler({"name": "Dashboard", "url": "http://localhost:5173/owner?x=1",
                                        "description": "the owner page"})
