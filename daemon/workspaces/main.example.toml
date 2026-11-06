@@ -6,9 +6,9 @@
 # machine = "Studio Mac"      # what the app calls this computer (default: its own name)
 name = "Main"
 color = "#3FA66B"
-# Where the app can reach it. "0.0.0.0" listens on every interface (your LAN,
-# and a VPN like ZeroTier or Tailscale); every request still needs a token.
-# Keep "127.0.0.1" if you put Caddy in front (see deploy/Caddyfile).
+# Where the app can reach it: you bring the network. "0.0.0.0" listens on every
+# interface (your LAN, a VPN); "127.0.0.1" behind a tunnel or reverse proxy.
+# Every request still needs a token.
 bind = "0.0.0.0"
 port = 8787
 # One token per device. Generate with: margind token

@@ -33,6 +33,8 @@ line `if p.Index < 0`"), so Claude can act on it.
   computer out of reach, and bring them into a chat when the time is right;
   nothing goes to Claude until you send it. The chats you opened last stay
   readable offline.
+- **Bring your own network.** No relay, no account: reach your computers over
+  your LAN, a VPN or a tunnel you already use.
 - **Voice.** Dictate messages and replies, with iPadOS 26's on-device speech
   analyzer where available.
 - **iPad first, iPhone too.** The same app works on iPhone and on Apple Silicon Macs.
@@ -46,101 +48,38 @@ line `if p.Index < 0`"), so Claude can act on it.
 | ![A project's ideas, waiting to be brought into a chat](docs/images/ideas.jpg) | ![A chat read offline; what you write is kept as an idea](docs/images/offline.jpg) |
 | ![Source with tree-sitter colouring](docs/images/code.jpg) | <img src="docs/images/iphone.jpg" width="300" alt="The same chat on iPhone"> |
 
-## Architecture
+## How it works
 
 ![Architecture: the Margin app, margind on each computer, and Claude Code](docs/images/architecture.svg)
 
-- **`margind`** is a small Python daemon that runs on each computer you want
-  to reach, with its own projects and token. It runs Claude Code through the
-  Claude Agent SDK, as you, in your project folders, and serves the app over
-  HTTP and a WebSocket. It stays thin: it drives the real Claude Code, reads
-  what Claude Code already writes, and adds only what a tablet needs.
-- **Margin** is a SwiftUI app. It talks to every computer you've added and
-  shows their projects and chats side by side in one sidebar, merged on the
-  device only; the computers never talk to each other.
+Margin is built on the [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/sdk)
+(formerly the Claude Code SDK). A small daemon, `margind`, runs on each
+computer you want to reach and drives the real Claude Code through it, as you,
+in your project folders. So your CLAUDE.md, settings, skills and MCP servers
+all apply, and a chat started on the iPad is a normal Claude Code session:
+`claude --resume` picks it up at the desk, and the other way round.
 
-Hosts: macOS, Linux and Windows, with Python 3.11+ and
+The SDK does the heavy lifting: sessions and resume, the permission callback
+that becomes Allow / Deny on the iPad, hooks, and in-process MCP tools that
+let Claude point you at things (`show`), offer replies to tap
+(`suggest_replies`), publish pages and add buttons. Margin adds what a tablet
+needs on top: the app, Pencil markup, plans as documents, web previews,
+shells, ideas, push.
+
+The flow of a chat, where state lives and a code map are in
+[docs/architecture.md](docs/architecture.md); the API is in
+[docs/protocol.md](docs/protocol.md).
+
+Hosts: macOS, Linux and Windows (newer, tested in CI), with Python 3.11+ and
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and
-logged in (`claude` works in a terminal). macOS is used every day; Windows
-support is new (shells through ConPTY, tested in CI) and on Windows app shells
-end when the daemon stops.
-
-### A chat, end to end
-
-1. You type or speak in a chat. The app posts it; the daemon hands it to that
-   chat's Claude Code process, starting one with `resume` if the chat was idle.
-   The app shows *Sending*, then *Starting Claude Code*, then *Thinking*.
-2. Claude works as it would at the desk. The daemon reads its output
-   continuously and turns each message into an event on the WebSocket. Every
-   event has a sequence number, so after a dropped connection or a daemon
-   restart the app catches up on what it missed.
-3. When Claude needs permission, the SDK's callback holds the tool call and the
-   app gets an approval (and a push, if set up). Plans (`ExitPlanMode`) arrive
-   in the folio to mark up, then approve or send back.
-4. Pencil marks are saved as PNGs in the project's `.margin/markup/`, with a
-   sentence for each stroke saying what it landed on, and go with your reply
-   for Claude to read.
-
-### Claude Code's, used as is
-
-- **The agent:** the real Claude Code with your settings, CLAUDE.md, skills and
-  MCP servers.
-- **Chats:** its transcripts are the source of truth, so the desk and the app
-  see the same chats.
-- **Background commands** (dev servers, watchers): read from its transcript
-  and output files and shown in the Shell tab. They end with the Claude
-  process, as at the desk.
-- **Modes, models and effort:** its own, set per chat.
-
-### What Margin adds
-
-- **Reaching the computer:** token auth, event replay, pairing links and QR codes.
-- **Seeing work:** a preview proxy with HTTPS and in-page ink, file renders
-  (PDF, images, KiCad, STEP), git review since any commit.
-- **Hands on the computer:** real shells, kept alive in GNU screen where it exists.
-- **Tools for Claude** (an in-process MCP server): `show` points you at a file,
-  line or diff; `suggest_replies` offers replies to tap; `publish_page` adds a
-  page to the Preview tab; `set_action` adds a button for a command. None of
-  them take focus.
-- **Hooks** that keep Claude from opening windows on the host and remind it
-  you're reading on a tablet.
-
-### Where state lives
-
-| | |
-|---|---|
-| Claude Code's own files | chats and background command output; Margin never writes them |
-| `~/.margin/` | device tokens; per workspace: its TLS CA, per-chat settings, plan versions with decisions, published pages, registered devices |
-| `.margin/` in a project | markup images, buttons, ideas |
-| On the device | paired computers (tokens in the Keychain), sidebar order, view settings; per computer, a copy of the chat list, the chats opened last, plans and ideas for reading offline (unreadable while locked, not backed up) |
-
-### Code map
-
-| | |
-|---|---|
-| `daemon/margind/server.py` | FastAPI app: HTTP routes, the events and terminal WebSockets, auth |
-| `sessions.py` | live Claude Code sessions: the reader, approvals, hooks, Margin's tools, history |
-| `normalize.py` | SDK messages and transcript lines into the one JSON shape the app renders |
-| `events.py` | the event bus: sequence numbers, replay buffer, boot id |
-| `proposals.py`, `scope.py` | plans and their versions; which commands an approved plan may run without asking |
-| `bgtasks.py` | Claude Code's background commands |
-| `terminals.py` | shells: pty + GNU screen on macOS/Linux, ConPTY on Windows |
-| `preview.py`, `tls.py` | dev servers, the HTTPS proxy per port, the daemon's own CA |
-| `files.py`, `gitreview.py`, `render.py`, `step.py` | project files, git diffs, KiCad renders, STEP to 3D |
-| `push.py`, `writing.py`, `localpage.py`, `desk.py` | APNs, "revise this passage", the local page and its Open in… buttons |
-| `ideas.py`, `actions.py` | a project's ideas and Claude's buttons, in `.margin/` |
-| `ios/Margin/Model/` | `AppModel` (all computers), `WorkspaceState` (one computer's live state), `Offline` (the device copy and ideas waiting to sync) |
-| `ios/Margin/Networking/` | `HostAPI`: the HTTP and WebSocket client for one daemon |
-| `ios/Margin/Views/` | sidebar, chat, plans, Pencil, code, shell, web preview, `Theme` |
-
-The daemon's HTTP and WebSocket API is in [docs/protocol.md](docs/protocol.md).
+logged in.
 
 ## 1. Run the daemon
 
 macOS / Linux:
 
 ```bash
-git clone <this repo> margin && cd margin/daemon
+git clone https://github.com/karlcswanson/margin.git && cd margin/daemon
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[push,qr]"
 
@@ -155,7 +94,7 @@ margind serve -c workspaces/main.toml       # port 8787
 Windows (PowerShell):
 
 ```powershell
-git clone <this repo> margin; cd margin\daemon
+git clone https://github.com/karlcswanson/margin.git; cd margin\daemon
 py -3 -m venv .venv; .venv\Scripts\Activate.ps1
 pip install -e ".[push,qr]"
 
@@ -167,39 +106,49 @@ copy workspaces\main.example.toml workspaces\main.toml
 margind serve -c workspaces\main.toml
 ```
 
-`workspaces/*.toml` (except the examples) and `*.tokens` are git-ignored.
-Every request needs a token, except the daemon's public CA certificate (for
-HTTPS previews) and a page that only answers the computer itself, at
-`http://127.0.0.1:8787/`: what's running, and each project with **Open in…**
-(the editors installed there) and **Folder**.
+On the computer itself, `http://127.0.0.1:8787/` shows what's running, with
+**Open in…** (your editors) and **Folder** for each project. To keep the
+daemon running, edit and install `deploy/macos/com.margin.main.plist`,
+`deploy/linux/margind@.service` or `deploy/windows/install-workspace.ps1`.
 
-To keep it running: `deploy/macos/com.margin.main.plist` (launchd),
-`deploy/linux/margind@.service` (systemd user unit) or
-`deploy/windows/install-workspace.ps1`. Edit the paths in them first.
+## 2. Bring your own network
 
-### Reaching it from the iPad
+Margin doesn't ship a relay, a tunnel or an account. The daemon speaks plain
+HTTP with a token on every request, and how your iPad reaches it is up to you:
 
-The app connects over plain HTTP to private addresses: your LAN, or a VPN such
-as ZeroTier or Tailscale for when you're out. Set `bind = "0.0.0.0"` (or the
-VPN address) in the workspace TOML, then print a pairing link:
+- **Your LAN**, at home or in the office.
+- **A VPN**: Tailscale, ZeroTier, NetBird, WireGuard, UniFi Teleport.
+- **A tunnel**: ngrok, Cloudflare Tunnel.
+- **A reverse proxy** with HTTPS on a name you own (`deploy/Caddyfile` is an example).
+
+Set `bind` in the workspace TOML to where it should listen (`0.0.0.0` for
+every interface, or `127.0.0.1` behind a tunnel or proxy), then make a
+pairing link with the address the iPad will use:
 
 ```bash
-margind pair -c workspaces/main.toml --url http://192.168.1.20:8787
+margind pair -c workspaces/main.toml --url http://100.101.102.103:8787
 ```
 
 It prints a `margin://add?…` link and, with the `qr` extra, a QR code. Scan it
 with the iPad camera, or paste the link in **Add workspace**.
 
-Want HTTPS on a name instead? `deploy/Caddyfile` puts Caddy in front, bound to
-the VPN address only, with a Let's Encrypt certificate from a DNS challenge.
-Web previews are served over HTTPS either way, signed by the daemon's own
-certificate authority (see [docs/protocol.md](docs/protocol.md#https-previews)).
+Good to know:
 
-## 2. Build the app
+- **iOS allows plain HTTP only to IP addresses and `.local` names.** Pair with
+  the VPN's IP address, or use an HTTPS address (a tunnel, or your VPN's own
+  HTTPS feature such as `tailscale serve`).
+- **Plain HTTP is only as private as the network.** A VPN or tunnel encrypts it;
+  open Wi-Fi doesn't.
+- **Behind a public tunnel, the token is the only lock.** Keep one token per
+  device so you can remove one.
+- **Web previews use their own ports** (8800–8819 by default). A VPN or LAN
+  carries them as is; a single-port tunnel carries chats, approvals and shells,
+  but not the Preview tab.
 
-Needs a Mac with Xcode 26 (the app runs on iOS/iPadOS 17 and later; voice
-uses iPadOS 26's speech analyzer when it's there) and
-[XcodeGen](https://github.com/yonaskolb/XcodeGen).
+## 3. Build the app
+
+Needs a Mac with Xcode 26 and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+The app runs on iOS/iPadOS 17 and later.
 
 ```bash
 brew install xcodegen
@@ -209,10 +158,10 @@ xcodegen && open Margin.xcodeproj
 ```
 
 Run it on your iPad from Xcode, or Archive → TestFlight (internal testing
-needs no review). It needs a paid Apple Developer account: the app carries the
-push notifications entitlement, which a free Apple ID can't sign.
+needs no review). It needs a paid Apple Developer account, for the push
+notifications entitlement.
 
-## 3. Push notifications (optional)
+## Push notifications (optional)
 
 Approve tool calls and plans from the lock screen.
 
@@ -220,42 +169,25 @@ Approve tool calls and plans from the lock screen.
 2. Put it in `~/.margin/` on each host and fill in `[apns]` in the workspace
    TOML (`bundle_id` = your `MARGIN_BUNDLE_ID`; `sandbox = true` for Xcode
    builds, `false` for TestFlight).
-3. Restart the daemon and reopen the app; it registers itself with every workspace.
+3. Restart the daemon and reopen the app.
 
-Notifications carry only a title and one line ("approve Bash?
-npm test …"). The content itself loads from your host when you open
-the app.
+Notifications carry only a title and one line ("approve Bash? npm test …");
+the content loads from your computer when you open the app.
 
-## 4. More computers
+## More computers
 
-Set up the daemon the same way on every computer you want to reach (a desktop,
-a laptop, a Linux box on the bench), pair each one, and they all show up in
-the same app. The sidebar groups chats by computer, labelled with its own name
-(set `machine` in the TOML to change it), and a chat or approval from any of
-them can reach you.
-
-One computer can also run several workspaces, each with its own port, token,
-projects and Claude Code login, for when you keep separate accounts (see
-`workspaces/second-login.example.toml`):
-
-```toml
-claude_config_dir = "~/.claude-second"     # its own login, history, settings
-# api_key_env = "SECOND_ANTHROPIC_API_KEY"  # or bill it to its own API key
-```
-
-Log that folder in once at the desk (`CLAUDE_CONFIG_DIR=~/.claude-second
-claude`, then `/login`). The sidebar adds the workspace name when one computer
-runs several.
-
-Check Anthropic's current terms for how subscription logins may be used
-through the Agent SDK; an API key sidesteps the question.
+Set up the daemon on every computer you want to reach and pair each one; they
+all show up in the same app, grouped by computer (set `machine` in the TOML to
+rename one). One computer can also run several workspaces, each with its own
+port, token, projects and Claude Code login, for separate accounts: see
+`workspaces/second-login.example.toml`. Check Anthropic's current terms for
+how subscription logins may be used through the Agent SDK; an API key
+sidesteps the question.
 
 ## Optional host tools
 
-- **KiCad** (`kicad-cli` on the PATH or in its usual install folder): schematics
-  and boards render in the app, and you can draw on them.
-- **STEP models**: set `cad_python` to a Python with `cadquery-ocp`, or keep one
-  in `~/.venvs/*`, and assemblies show as 3D models you can explode.
+- **KiCad** (`kicad-cli`): schematics and boards render in the app, and you can draw on them.
+- **STEP models**: set `cad_python` to a Python with `cadquery-ocp` to see assemblies in 3D.
 - **GNU screen** (macOS/Linux): app shells outlive daemon restarts and can be
   attached at the desk with `screen -x margin-<project>-<n>`.
 
@@ -273,6 +205,7 @@ Debug builds of the app take a few launch settings, handy with the Simulator
 `MARGIN_TAB`, `MARGIN_FILE`, `MARGIN_DIFF_BASE`, `MARGIN_EDIT`, `MARGIN_PREVIEW` (a port),
 `MARGIN_SHELL` (a shell id, or `task:<id>`) and `MARGIN_NO_PUSH` (skip the notification prompt).
 
+- [docs/architecture.md](docs/architecture.md): how it fits together, where state lives, a code map.
 - [docs/protocol.md](docs/protocol.md): the daemon's HTTP and WebSocket API.
 - `ios/Margin/Views/Theme.swift`: colours, type and spacing in one place.
 - `design/icon/`: the app icon's sources.
