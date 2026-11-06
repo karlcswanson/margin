@@ -152,8 +152,8 @@ struct SessionView: View {
                     ChatFilesView(ws: ws, project: project, folder: $filesFolder, file: $filesFile, focusLines: filesFocus?.path == filesFile?.path ? filesFocus?.lines : nil)
                 }
             case .preview:
-                ChatPreviewView(ws: ws, project: project, sessionId: sessionId, target: $previewTarget) { task in
-                    shellSelected = "task:\(task)"
+                ChatPreviewView(ws: ws, project: project, sessionId: sessionId, target: $previewTarget) { shell in
+                    shellSelected = shell
                     withAnimation { tab = .shell }
                 }
             case .shell:

@@ -255,6 +255,11 @@ struct HostAPI {
         try await get("v1/sessions/\(sessionId)/tasks")
     }
 
+    /// Stop one of Claude's background commands through Claude Code; the chat carries on.
+    func stopTask(sessionId: String, taskId: String) async throws {
+        _ = try await send(try request("v1/sessions/\(sessionId)/tasks/\(taskId)/stop", method: "POST"))
+    }
+
     func taskOutput(sessionId: String, taskId: String, since: Int?) async throws -> TaskOutput {
         try await get("v1/sessions/\(sessionId)/tasks/\(taskId)/output",
                       query: since.map { ["since": String($0)] } ?? [:])

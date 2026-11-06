@@ -60,6 +60,7 @@ struct ShellInfo: Codable, Hashable, Identifiable {
     var alive: Bool?
     var title: String?
     var detached: Bool?
+    var outside: Bool?             // started outside Margin (by Claude, or at the desk): closing only lets go
     var key: String { id ?? name }
 }
 
@@ -331,7 +332,9 @@ struct ChatShellView: View {
     @State private var tick = 0          // redraw on connection changes
 
     private var live: [ShellInfo] { shells.filter { $0.id != nil } }
-    private var detached: [ShellInfo] { shells.filter { $0.id == nil } }
+    private var detached: [ShellInfo] { shells.filter { $0.id == nil && $0.outside != true } }
+    /// Screen sessions running in this project that Margin didn't start, not attached yet.
+    private var outside: [ShellInfo] { shells.filter { $0.id == nil && $0.outside == true } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -372,9 +375,15 @@ struct ChatShellView: View {
             }
         }
         .task(id: selected) {
+            // the Preview tab asked for a server's screen session: attach it
+            if let selected, selected.hasPrefix("screen:") {
+                await open(name: String(selected.dropFirst("screen:".count)))
+                return
+            }
             // a button just started one: fetch it
             if let selected, !selected.hasPrefix("task:"), !live.contains(where: { $0.id == selected }) { await load() }
         }
+        .onChange(of: ws.tasksChanged[sessionId]) { Task { await loadTasks() } }
     }
 
     private var tabs: some View {
@@ -386,9 +395,9 @@ struct ChatShellView: View {
                         Image(systemName: "terminal")
                         Text(label(s)).lineLimit(1)
                         if on {
-                            Button { Task { await close(s) } } label: { Image(systemName: "xmark") }
+                            Button { Task { await close(s) } } label: { Image(systemName: s.outside == true ? "eject" : "xmark") }
                                 .buttonStyle(.plain).foregroundStyle(.secondary)
-                                .accessibilityLabel("End this shell")
+                                .accessibilityLabel(s.outside == true ? "Let go of it (it keeps running)" : "End this shell")
                         }
                     }
                     .font(Theme.Fonts.meta)
@@ -410,6 +419,17 @@ struct ChatShellView: View {
                     .contentShape(Capsule())
                     .onTapGesture { selected = "task:\(t.id)" }
                     .help("Claude: \(t.command)")
+                }
+                ForEach(outside, id: \.key) { s in
+                    HStack(spacing: 6) {
+                        Image(systemName: "rectangle.stack")
+                        Text(s.name).lineLimit(1)
+                    }
+                    .font(Theme.Fonts.meta).foregroundStyle(.secondary)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .contentShape(Capsule())
+                    .onTapGesture { Task { await open(name: s.name) } }
+                    .help("A screen session in \(project), started outside Margin")
                 }
                 Button { Task { await open(name: nil) } } label: { Label("New shell", systemImage: "plus") }
                     .font(Theme.Fonts.meta).padding(.horizontal, 6)
@@ -469,6 +489,11 @@ struct ChatShellView: View {
                 Spacer()
                 Text(t.running ? "Claude is running this" : (t.summary?.isEmpty == false ? t.summary! : t.status))
                     .font(Theme.Fonts.caption).foregroundStyle(.secondary).lineLimit(1)
+                if t.running {
+                    Button { Task { await stop(t) } } label: { Image(systemName: "stop.circle") }
+                        .buttonStyle(.borderless).tint(.red)
+                        .accessibilityLabel("Stop this command")
+                }
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
             Divider()
@@ -513,6 +538,15 @@ struct ChatShellView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    private func stop(_ t: BackgroundTask) async {
+        do {
+            try await ws.api.stopTask(sessionId: sessionId, taskId: t.id)
+        } catch {
+            self.error = error.localizedDescription
+        }
+        await loadTasks()
     }
 
     private func close(_ s: ShellInfo) async {

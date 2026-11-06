@@ -17,7 +17,7 @@ token_file = "~/.margin/main.tokens"
 # use at the desk: same sessions, memory, CLAUDE.md, MCP servers.
 # claude_config_dir = "~/.claude"
 default_permission_mode = "default"
-idle_disconnect_minutes = 30
+idle_disconnect_minutes = 30   # not while Claude has background commands running or a wakeup scheduled
 
 # The folders Claude may work in. Chats started in a project's folder (or
 # below it) at the desk show up under it in the app too.

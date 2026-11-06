@@ -112,11 +112,13 @@ class BackgroundTasks:
         return s
 
     def list(self, session_id: str, live_since: float | None = None,
-             seen: tuple[float, dict[str, str]] | None = None) -> list[dict[str, Any]]:
+             seen: tuple[float, dict[str, str]] | None = None,
+             live: dict[str, str] | None = None) -> list[dict[str, Any]]:
         """Newest first. `live_since`: when this daemon's Claude for the session
         started; tasks it started without an ending yet are still running.
         `seen`: Claude Code's own list at the end of its last turn (when, and
-        the ones still in flight), which settles any task started before it."""
+        the ones still in flight), which settles any task started before it.
+        `live`: what Claude Code said as each started or ended; it wins."""
         s = self._scan(session_id)
         if s is None:
             return []
@@ -130,6 +132,8 @@ class BackgroundTasks:
                 recent = time.time() - st.st_mtime < RECENT_OUTPUT
             except OSError:
                 t["size"], recent = 0, False
+            if live and t["id"] in live:
+                t["status"] = live[t["id"]]
             if t["status"] is None and seen and t["started_at"] < seen[0]:
                 t["status"] = seen[1].get(t["id"], "stopped")
                 if t["status"] == "pending":

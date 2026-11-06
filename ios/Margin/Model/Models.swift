@@ -276,6 +276,7 @@ struct ListeningServer: Codable, Hashable, Identifiable {
     var claudeCommand: String?
     var claudeTask: String?
     var claudeDescription: String?
+    var screen: String?              // the screen session it runs in (its output is in the Shell tab)
     var id: Int { port }
 }
 

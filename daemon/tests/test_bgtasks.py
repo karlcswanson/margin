@@ -59,6 +59,8 @@ def test_reads_claude_codes_background_commands(tmp_path, monkeypatch):
     # Quiet output, but Claude Code said at the end of its turn that it's still running.
     assert {t["id"]: t["status"] for t in b.list(sid, seen=(time.time(), {"bserve123": "running"}))}["bserve123"] == "running"
     assert {t["id"]: t["status"] for t in b.list(sid, seen=(time.time(), {}))}["bserve123"] == "stopped"
+    # What Claude Code said as it happened wins over both.
+    assert {t["id"]: t["status"] for t in b.list(sid, seen=(time.time(), {}), live={"bserve123": "running"})}["bserve123"] == "running"
     with open(transcript, "a") as f:
         _line(f, {"type": "user", "message": {"content": "<task-notification>\n<task-id>bserve123</task-id>\n"
                   "<status>killed</status>\n</task-notification>"}})

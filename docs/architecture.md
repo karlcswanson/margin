@@ -32,9 +32,11 @@
   MCP servers.
 - **Chats:** its transcripts are the source of truth, so the desk and the app
   see the same chats.
-- **Background commands** (dev servers, watchers): read from its transcript
-  and output files and shown in the Shell tab. They end with the Claude
-  process, as at the desk.
+- **Background commands** (dev servers, watchers): reported by Claude Code as
+  they start and end, read from its transcript and output files, and shown in
+  the Shell tab, where they can be stopped. They end with the Claude process,
+  as at the desk, so a chat's Claude stays running while any do. Screen sessions started in a project's folder some other way
+  show there too.
 - **Modes, models and effort:** its own, set per chat.
 
 ## What Margin adds

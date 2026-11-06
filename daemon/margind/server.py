@@ -342,13 +342,18 @@ def create_app(ws: WorkspaceConfig, manager: SessionManager | None = None,
         Claude started in the background say which chat, and its description."""
         def _list() -> list[dict[str, Any]]:
             items = preview.listening(ws)
+            in_screen = shells.screen_of([int(it["pid"]) for it in items if it.get("pid")])
+            for it in items:     # a server kept in a screen session: its output is in the Shell tab
+                if name := in_screen.get(int(it.get("pid") or 0)):
+                    it["screen"] = name
             tasks: dict[str, list[dict[str, Any]]] = {}
             for it in items:
                 sid = it.get("claude_session")
                 if not sid:
                     continue
                 if sid not in tasks:
-                    tasks[sid] = background.list(sid, _live_since(sid), manager.claude_tasks.get(sid))
+                    tasks[sid] = background.list(sid, _live_since(sid), manager.claude_tasks.get(sid),
+                                                  manager.task_states.get(sid))
                 cmd = str(it.get("claude_command") or "").strip()
                 t = next((t for t in tasks[sid] if t["command"].strip() == cmd), None)
                 if t:
@@ -533,7 +538,15 @@ def create_app(ws: WorkspaceConfig, manager: SessionManager | None = None,
     @app.get("/v1/sessions/{session_id}/tasks", dependencies=[Depends(auth)])
     async def background_tasks(session_id: str) -> list[dict[str, Any]]:
         return await asyncio.to_thread(background.list, session_id, _live_since(session_id),
-                                       manager.claude_tasks.get(session_id))
+                                       manager.claude_tasks.get(session_id), manager.task_states.get(session_id))
+
+    @app.post("/v1/sessions/{session_id}/tasks/{task_id}/stop", dependencies=[Depends(auth)])
+    async def stop_background_task(session_id: str, task_id: str) -> dict[str, bool]:
+        try:
+            await manager.stop_task(session_id, task_id)
+        except KeyError:
+            raise HTTPException(409, "Claude isn't running in this chat")
+        return {"ok": True}
 
     @app.get("/v1/sessions/{session_id}/tasks/{task_id}/output", dependencies=[Depends(auth)])
     async def background_output(session_id: str, task_id: str, since: int | None = None) -> dict[str, Any]:

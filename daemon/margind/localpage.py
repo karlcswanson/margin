@@ -51,7 +51,8 @@ async def status(ws: Any, manager: Any, previews: Any, shells: Any = None, backg
         if background is not None:
             since = manager.live[sid].started_at if live else None
             tasks = [t for t in await asyncio.to_thread(background.list, sid, since,
-                                                         manager.claude_tasks.get(sid)) if t["status"] == "running"]
+                                                         manager.claude_tasks.get(sid),
+                                                         manager.task_states.get(sid)) if t["status"] == "running"]
         sessions.append({
             "session_id": sid, "project": r.get("project"), "title": r.get("title"),
             "status": r["status"], "live": live, "last_modified": r.get("last_modified"),

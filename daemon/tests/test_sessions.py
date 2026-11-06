@@ -42,6 +42,9 @@ class FakeClient:
     async def interrupt(self):
         pass
 
+    async def stop_task(self, task_id):
+        self.stopped = getattr(self, "stopped", []) + [task_id]
+
     async def query(self, prompt):
         self.prompts.append(prompt)
         self.asked.put_nowait(prompt)
@@ -115,6 +118,7 @@ def test_full_turn_with_approval():
             assert isinstance(client.decisions[0], PermissionResultAllow)
             assert client.options.session_id == sid and client.options.resume is None
             assert client.options.cwd == ws.projects[0].path
+            assert client.options.env["PYTHONUNBUFFERED"] == "1"
             kinds = [i["kind"] for e in events() if e["type"] == "session.items" for i in e["items"]]
             assert kinds == ["user_text", "text", "tool_use"]
 
@@ -609,4 +613,48 @@ def test_approvals_push_on_claude_codes_notification():
             await sess._on_notification({"message": "Waiting for input", "notification_type": "idle_prompt"}, None, None)
             assert notes[-1]["kind"] == "notification" and notes[-1]["body"] == "Sign in again"
             assert notes[-1]["title"] == "Personal: Auth · pcb" and len(notes) == 2
+    asyncio.run(run())
+
+
+def test_background_commands_as_claude_code_reports_them():
+    from claude_agent_sdk import TaskNotificationMessage, TaskStartedMessage, TaskUpdatedMessage, UserMessage
+    from claude_agent_sdk import ToolResultBlock
+
+    from margind.sessions import LiveSession
+
+    async def run():
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = make_ws(tmp)
+            bus = EventBus()
+            mgr = SessionManager(ws, bus, client_factory=FakeClient)
+            sess = LiveSession(mgr, "s1", "pcb", ws.projects[0].path, resume=False, permission_mode="default")
+            told = lambda: len([e for e in bus.replay(0) if e["type"] == "session.tasks"])
+            base = dict(uuid="u", session_id="x")
+            await sess._handle(TaskStartedMessage(subtype="task_started", data={}, task_id="b1", description="dev",
+                                                  tool_use_id="tu1", task_type="local_bash", **base))
+            assert mgr.task_states["s1"] == {"b1": "running"} and told() == 1
+            # Its result lands in the transcript: told again, so the app finds where its output goes.
+            await sess._handle(UserMessage(content=[ToolResultBlock(tool_use_id="tu1", content="started")]))
+            assert told() == 2 and not sess.starting
+            await sess._handle(TaskUpdatedMessage(subtype="task_updated", data={}, task_id="b1",
+                                                  patch={"status": "killed"}, **base))
+            assert mgr.task_states["s1"] == {"b1": "killed"}
+            await sess._handle(TaskNotificationMessage(subtype="task_notification", data={}, task_id="b1",
+                                                       status="stopped", output_file="/x", summary="", **base))
+            assert mgr.task_states["s1"] == {"b1": "stopped"} and told() == 4
+
+            # Nothing left running: the chat's Claude may be let go when idle.
+            assert not mgr.running_tasks("s1")
+            mgr.claude_tasks["s1"] = (0, {"b2": "running"})      # still running at the end of the last turn
+            assert mgr.running_tasks("s1")
+            mgr.task_states["s1"]["b2"] = "completed"            # and ended since
+            assert not mgr.running_tasks("s1")
+
+            # Stopping one goes to Claude Code; only while Claude runs in that chat.
+            with pytest.raises(KeyError):
+                await mgr.stop_task("s1", "b1")
+            sess.client = FakeClient(None)
+            mgr.live["s1"] = sess
+            await mgr.stop_task("s1", "b1")
+            assert sess.client.stopped == ["b1"]
     asyncio.run(run())

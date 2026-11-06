@@ -28,6 +28,9 @@ from claude_agent_sdk import (
     PermissionUpdate,
     ResultMessage,
     SystemMessage,
+    TaskNotificationMessage,
+    TaskStartedMessage,
+    TaskUpdatedMessage,
     TextBlock,
     ThinkingBlock,
     ToolPermissionContext,
@@ -85,6 +88,11 @@ sitting at this computer. Nothing shown on this machine's screen reaches them.
   (not the shell's current directory, which may have moved). Don't build HTML viewers.
 - Web pages and apps: run the dev server (or `python3 -m http.server`) on
   this machine in the background and link it, e.g. [the app](http://localhost:5173/).
+- Anything long-running (servers, daemons, watchers): start it with Bash's
+  `run_in_background`, never with `screen`, `nohup`, `&` or output redirected
+  to a log file. The user watches, and can stop, your background commands in
+  Margin's Shell tab, and they keep running while this chat is idle; read
+  their output from the file Claude Code gives you.
   Margin opens localhost links in a browser on the iPad through its own proxy,
   live reload included, and the user can mark the page up. Don't open a browser here.
   Also publish each page or service you start with the `publish_page` tool (a
@@ -222,6 +230,7 @@ class LiveSession:
         self.turn: dict[str, Any] | None = None   # while working: since when, tokens, what it's doing
         self.wrote = False                         # wrote the user text since its last command this turn
         self.offered: bool | None = None           # offered replies this turn: had it written an answer first?
+        self.starting: set[str] = set()            # tool uses that started a background command, result not in yet
         self.status = "starting"
         self.queue: asyncio.Queue[str] = asyncio.Queue()     # message ids, in order
         self.queued: dict[str, str] = {}                      # id -> text, until sent (or cancelled)
@@ -433,8 +442,10 @@ class LiveSession:
                 try:
                     first = await asyncio.wait_for(self.queue.get(), timeout=idle)
                 except asyncio.TimeoutError:
-                    if self.turn is not None or self.mgr.crons.get(self.session_id):
-                        continue                   # working on something it started itself, or will
+                    if self.turn is not None or self.mgr.crons.get(self.session_id) \
+                            or self.mgr.running_tasks(self.session_id):
+                        continue                   # working on something it started itself, or will;
+                                                   # or its background commands would end with it
 
                     break
                 prompt = self._take(first)
@@ -469,6 +480,8 @@ class LiveSession:
             if self.turn is not None:
                 self._end_turn()
             self.mgr.claude_tasks.pop(self.session_id, None)    # they end with the Claude process
+            if self.mgr.task_states.pop(self.session_id, None):
+                self.mgr.bus.publish("session.tasks", session_id=self.session_id)
             self.mgr.set_crons(self.session_id, [])
             self._set_status("closed")
             self.mgr.live.pop(self.session_id, None)
@@ -634,7 +647,24 @@ class LiveSession:
             self.turn["doing"] = "Agent: " + self.turn["doing"].lower()
         self._publish_turn()
 
+    def _task_event(self, msg: Any) -> None:
+        """Claude Code says a background command started or ended, as it happens."""
+        if isinstance(msg, TaskStartedMessage):
+            status = "running"
+            if msg.tool_use_id:
+                self.starting.add(msg.tool_use_id)
+        elif isinstance(msg, TaskUpdatedMessage):
+            status = msg.status or (msg.patch or {}).get("status")
+        else:
+            status = msg.status
+        if not status:
+            return
+        self.mgr.task_states.setdefault(self.session_id, {})[msg.task_id] = "running" if status == "pending" else status
+        self.mgr.bus.publish("session.tasks", session_id=self.session_id)
+
     async def _handle(self, msg: Any) -> None:
+        if isinstance(msg, (TaskStartedMessage, TaskUpdatedMessage, TaskNotificationMessage)):
+            self._task_event(msg)
         if isinstance(msg, SystemMessage):
             return
         if isinstance(msg, ResultMessage):
@@ -665,6 +695,10 @@ class LiveSession:
         items = normalize.from_sdk(msg)
         if items:
             self.mgr.bus.publish("session.items", session_id=self.session_id, items=items)
+            # Its tool result is in the transcript now, with where the output goes.
+            if self.starting & {i.get("tool_use_id") for i in items if i["kind"] == "tool_result"}:
+                self.starting -= {i.get("tool_use_id") for i in items}
+                self.mgr.bus.publish("session.tasks", session_id=self.session_id)
 
     # -- permissions ------------------------------------------------------
     async def _can_use_tool(self, tool_name: str, tool_input: dict[str, Any],
@@ -778,6 +812,8 @@ class SessionManager:
         self.crons: dict[str, list[dict[str, Any]]] = {}     # session id -> wakeups Claude scheduled
         # session id -> (when, {task id: status}): its background commands, at the end of its last turn
         self.claude_tasks: dict[str, tuple[float, dict[str, str]]] = {}
+        # session id -> {task id: status}: background commands started or ended while live, as they happen
+        self.task_states: dict[str, dict[str, str]] = {}
         self.approval_push_after = APPROVAL_PUSH_AFTER
         self._models_task: asyncio.Task | None = None
         self.started_at = time.time()
@@ -791,6 +827,20 @@ class SessionManager:
                 await self._notifier(payload)
             except Exception:
                 log.exception("notification failed")
+
+    def running_tasks(self, session_id: str) -> bool:
+        """Claude's background commands still running in this chat, by what
+        Claude Code said as they started and ended, or at the end of its last turn."""
+        states = dict(self.claude_tasks.get(session_id, (0, {}))[1])
+        states.update(self.task_states.get(session_id, {}))
+        return any(s == "running" for s in states.values())
+
+    async def stop_task(self, session_id: str, task_id: str) -> None:
+        """Stop one of Claude's background commands, as at the desk; the chat carries on."""
+        sess = self.live.get(session_id)
+        if sess is None or sess.client is None:
+            raise KeyError(session_id)
+        await sess.client.stop_task(task_id)
 
     def push_later(self, req: PendingPermission, payload: dict[str, Any]) -> None:
         """An approval or plan is pushed when Claude Code raises its own

@@ -154,8 +154,9 @@ struct ChatPreviewView: View {
     let project: String?
     var sessionId: String? = nil
     @Binding var target: WebTarget?
-    /// Show one of Claude's background commands in the Shell tab.
-    var showTask: ((String) -> Void)? = nil
+    /// Show a server's output in the Shell tab: "task:<id>" for one of
+    /// Claude's background commands, "screen:<name>" for a screen session.
+    var showShell: ((String) -> Void)? = nil
 
     @State private var servers: [ListeningServer]?
     @State private var error: String?
@@ -248,8 +249,8 @@ struct ChatPreviewView: View {
                         .font(Theme.Fonts.caption.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                if let task = s.claudeTask, let showTask {
-                    Button { showTask(task) } label: { Image(systemName: "terminal") }
+                if let shell = s.claudeTask.map({ "task:\($0)" }) ?? s.screen.map({ "screen:\($0)" }), let showShell {
+                    Button { showShell(shell) } label: { Image(systemName: "terminal") }
                         .buttonStyle(.borderless)
                         .tint(.accentColor)
                         .accessibilityLabel("Output")
@@ -266,9 +267,16 @@ struct ChatPreviewView: View {
                     Image(systemName: "network").foregroundStyle(Color.accentColor).frame(width: 22)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("localhost:\(String(s.port))").font(Theme.Fonts.body.monospaced())
-                        Text([s.command, s.cwd].compactMap { $0 }.joined(separator: " · "))
+                        Text([s.command, s.screen.map { "screen \($0)" }, s.cwd].compactMap { $0 }.joined(separator: " · "))
                             .font(Theme.Fonts.caption).foregroundStyle(.secondary).lineLimit(1)
                             .truncationMode(.middle)
+                    }
+                    Spacer(minLength: 0)
+                    if let name = s.screen, s.project == project, let showShell {
+                        Button { showShell("screen:\(name)") } label: { Image(systemName: "terminal") }
+                            .buttonStyle(.borderless)
+                            .tint(.accentColor)
+                            .accessibilityLabel("Output")
                     }
                 }
             }

@@ -27,6 +27,7 @@ final class WorkspaceState: Identifiable {
     var shows: [String: [ShowItem]] = [:]               // by session: what Claude pointed at
     var replies: [String: [String]] = [:]                // by session: answers Claude offered
     var wakeups: [String: [Wakeup]] = [:]                // by session: when Claude will check back
+    var tasksChanged: [String: Int] = [:]                // by session: bumped when a background command starts or ends
     var activity: [String: Activity] = [:]               // by session, while Claude works
     @ObservationIgnored private var displayReported: [String: String] = [:]
     var connection: Connection = .connecting
@@ -230,6 +231,8 @@ final class WorkspaceState: Identifiable {
             if let sid = ev.sessionId { activity[sid] = ev.activity }
         case "session.replies":
             if let sid = ev.sessionId { replies[sid] = ev.replies ?? [] }
+        case "session.tasks":
+            if let sid = ev.sessionId { tasksChanged[sid, default: 0] += 1 }
         case "session.crons":
             if let sid = ev.sessionId { wakeups[sid] = ev.crons ?? [] }
         case "ideas":

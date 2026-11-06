@@ -65,10 +65,11 @@ class Terminal:
     cols: int = 100
     rows: int = 30
     pty: _WinPty | None = None   # Windows: the ConPTY (pid and fd are unused)
+    outside: bool = False          # a screen session started outside Margin: closing only detaches
 
     def public(self) -> dict[str, Any]:
         return {"id": self.id, "project": self.project, "cwd": self.cwd, "name": self.name,
-                "screen": self.screen, "alive": self.alive, "title": self.title,
+                "screen": self.screen, "alive": self.alive, "title": self.title, "outside": self.outside,
                 "created_at": self.created_at, "offset": self.offset}
 
 
@@ -89,16 +90,56 @@ class Terminals:
             if name not in attached and project in (None, proj):
                 out.append({"id": None, "project": proj, "name": name, "screen": True, "alive": True,
                             "detached": True})
+        # and ones started some other way (by Claude, or at the desk) in a project's folder
+        for name, (proj, cwd) in self.outside_screens().items():
+            if name not in attached and project in (None, proj):
+                out.append({"id": None, "project": proj, "cwd": cwd, "name": name, "screen": True,
+                            "alive": True, "detached": True, "outside": True})
         return out
 
-    def _screens(self) -> list[str]:
+    def _all_screens(self) -> list[tuple[int, str]]:
         if not self.screen:
             return []
         try:
             out = subprocess.run([self.screen, "-ls"], capture_output=True, text=True, timeout=5).stdout
         except (OSError, subprocess.TimeoutExpired):
             return []
-        return re.findall(r"^\s*\d+\.(margin-[\w.-]+)\s", out, re.M)
+        return [(int(pid), name) for pid, name in re.findall(r"^\s*(\d+)\.([\w.-]+)\s", out, re.M)]
+
+    def _screens(self) -> list[str]:
+        return [name for _, name in self._all_screens() if name.startswith("margin-")]
+
+    def outside_screens(self) -> dict[str, tuple[str, str]]:
+        """Screen sessions not started by Margin whose program runs in a
+        project's folder: name -> (project, folder)."""
+        from .preview import _cwd_of
+        roots = [(p.name, os.path.realpath(os.path.expanduser(p.path))) for p in self.ws.projects]
+        found: dict[str, tuple[str, str]] = {}
+        for pid, name in self._all_screens():
+            if name.startswith("margin-"):
+                continue
+            cwd = next((c for c in map(_cwd_of, [*_children(pid), pid]) if c), None)
+            proj = next((n for n, r in roots if cwd and is_project_dir(cwd, r)), None)
+            if proj and cwd:
+                found[name] = (proj, cwd)
+        return found
+
+    def screen_of(self, pids: list[int]) -> dict[int, str]:
+        """For each process, the screen session it runs in, if any."""
+        screens = dict(self._all_screens())
+        if not screens:
+            return {}
+        out = {}
+        for pid in pids:
+            p = pid
+            for _ in range(10):
+                if p in screens:
+                    out[pid] = screens[p]
+                    break
+                p = _parent(p)
+                if p <= 1:
+                    break
+        return out
 
     def _wait_detached(self, name: str, timeout: float = 3.0) -> None:
         # Right after the daemon restarts, screen may still think the old
@@ -117,13 +158,17 @@ class Terminals:
         """A new shell in `cwd`, or (with the name of a screen session from
         `list`) that session again. With `command`, the shell runs it first
         and stays open after, so its output can be read and worked with."""
+        outside = False
         if name:
-            if not re.fullmatch(r"margin-[\w.-]+", name):
-                raise ValueError("not a Margin shell")
             for t in self.items.values():
                 if t.name == name and t.alive:
                     return t
-            self._wait_detached(name)
+            if not re.fullmatch(r"margin-[\w.-]+", name):
+                if self.outside_screens().get(name, (None,))[0] != project:
+                    raise ValueError("not a shell in this project")
+                outside = True
+            else:
+                self._wait_detached(name)
         else:
             used = {t.name for t in self.items.values()} | set(self._screens())
             n = 1
@@ -161,7 +206,7 @@ class Terminals:
             argv = inner
         pid, fd = _spawn(argv, cwd, env)
         t = Terminal(id=uuid.uuid4().hex[:10], project=project, cwd=cwd, name=name,
-                     screen=bool(self.screen), pid=pid, fd=fd)
+                     screen=bool(self.screen), pid=pid, fd=fd, outside=outside)
         self.items[t.id] = t
         _resize(fd, t.cols, t.rows)
         asyncio.get_running_loop().add_reader(fd, self._readable, t)
@@ -262,8 +307,9 @@ class Terminals:
                 _resize(t.fd, cols, rows)
 
     def close(self, t: Terminal) -> None:
-        """End the shell for good (and its screen session)."""
-        if t.screen and self.screen:
+        """End the shell for good (and its screen session). One started
+        outside Margin is only let go of: it keeps running, as it was."""
+        if t.screen and self.screen and not t.outside:
             subprocess.run([self.screen, "-S", t.name, "-X", "quit"], capture_output=True, timeout=5)
         if t.pty is None:
             try:
@@ -285,6 +331,22 @@ class Terminals:
                 except OSError:
                     pass
             self._ended(t)        # on Windows this ends the shell: there is no screen to keep it
+
+
+def _children(pid: int) -> list[int]:
+    try:
+        out = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [int(p) for p in out.split()]
+
+
+def _parent(pid: int) -> int:
+    try:
+        return int(subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True,
+                                  timeout=5).stdout.strip() or 0)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return 0
 
 
 def _slug(s: str) -> str:

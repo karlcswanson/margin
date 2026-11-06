@@ -100,7 +100,9 @@ class WorkspaceConfig:
 
     def sdk_env(self) -> dict[str, str]:
         """Environment passed to the Claude Code subprocess."""
-        env: dict[str, str] = {}
+        # Claude's background commands write to a file, not a terminal: without
+        # this, Python holds back what they print and the Shell tab stays blank.
+        env: dict[str, str] = {"PYTHONUNBUFFERED": "1"}
         if self.claude_config_dir:
             env["CLAUDE_CONFIG_DIR"] = os.path.expanduser(self.claude_config_dir)
         if self.api_key_env:

@@ -122,3 +122,46 @@ def test_screen_shell_outlives_the_daemon():
                 subprocess.run(["screen", "-S", t.name, "-X", "quit"], capture_output=True)
 
     asyncio.run(run())
+
+
+@posix_shell
+def test_screen_sessions_started_elsewhere_show_and_are_only_let_go():
+    """A screen session Claude or the desk started in a project's folder is
+    listed with that project's shells, attaches like one, and closing it in
+    the app leaves it running."""
+    if not shutil.which("screen"):
+        pytest.skip("screen not installed")
+    import asyncio
+
+    from margind.terminals import Terminals
+
+    async def run():
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = make_ws(tmp)
+            cwd = os.path.join(tmp, "proj")
+            name = f"station-{os.getpid()}"
+            subprocess.run(["screen", "-dmS", name, "sleep", "60"], cwd=cwd, check=True)
+            try:
+                sh = Terminals(ws)
+                for _ in range(20):
+                    if name in sh.outside_screens():
+                        break
+                    await asyncio.sleep(0.1)
+                (item,) = [x for x in sh.list("pcb") if x["name"] == name]
+                assert item["outside"] and item["detached"] and item["id"] is None
+                assert not [x for x in sh.list("other") if x["name"] == name]
+                with pytest.raises(ValueError):
+                    sh.open("other", cwd, name)
+                sleeper = int(subprocess.run(["pgrep", "-f", "sleep 60"], capture_output=True, text=True,
+                                             cwd=cwd).stdout.split()[-1])
+                assert sh.screen_of([sleeper]).get(sleeper) == name
+                t = sh.open("pcb", cwd, name)
+                assert t.outside
+                await asyncio.sleep(1)
+                sh.close(t)
+                await asyncio.sleep(0.5)
+                assert name in subprocess.run(["screen", "-ls"], capture_output=True, text=True).stdout
+            finally:
+                subprocess.run(["screen", "-S", name, "-X", "quit"], capture_output=True)
+
+    asyncio.run(run())

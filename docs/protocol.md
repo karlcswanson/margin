@@ -34,7 +34,7 @@ One daemon process = one workspace. All requests need
 | POST | `/v1/proposals/{id}` | `{decision: "approve"\|"revise", feedback?}` | `Proposal` |
 | POST | `/v1/sessions/{id}/markup` | PNG/JPEG body | `{path}`: absolute, under `<session folder>/.margin/markup/` |
 | POST | `/v1/markup` | `?project=`, PNG/JPEG body | `{path}`: the same for a markup made outside a chat (a code review), under `<project>/.margin/markup/` |
-| GET | `/v1/previews/servers` | | `[{port, pid, command, cwd, project}]`: servers listening on the host, started in a folder |
+| GET | `/v1/previews/servers` | | `[{port, pid, command, cwd, project, screen?}]`: servers listening on the host, started in a folder (`screen`: the screen session it runs in, listed in the Shell tab) |
 | POST | `/v1/previews` | `{port}` | `{target_port, listen_port, auth_path}`: proxies `localhost:<port>` on `<bind>:<listen_port>` (from `preview_ports`); open `auth_path` there first (sets the cookie every request needs). Live-reload websockets pass through |
 | DELETE | `/v1/previews/{port}` | | `{ok}` |
 | POST | `/v1/devices` | `{token, name, environment}` | `{ok, push_enabled}` (APNs device token) |
@@ -95,6 +95,7 @@ permissions, open transcripts).
 | `session.activity` | `session_id, activity: {started_at, tokens, doing, detail} \| null` (Claude Code's spinner line while a turn runs) |
 | `session.settings` | `session_id, settings` |
 | `session.replies` | `session_id, replies:[string]` (Claude's suggested replies; `[]` once you send something) |
+| `session.tasks` | `session_id` (a background command started or ended: refetch its tasks) |
 | `session.show` | `session_id, shows:[{id, title, url?, file?, note?}]` |
 | `session.crons` | `session_id, crons:[{id, schedule, recurring, prompt, next_at}]` (wakeups Claude scheduled; `next_at` in local time, or null) |
 | `proposal` | `proposal` (a plan presented, decided or finished) |
@@ -147,9 +148,9 @@ everything trust it, WebSockets and service workers included.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| GET | `/v1/terminals?project=` | | `[{id, project, cwd, name, screen, alive, title, offset}]`, plus `{id: null, name, detached: true}` for screen sessions left from before a daemon restart |
+| GET | `/v1/terminals?project=` | | `[{id, project, cwd, name, screen, alive, title, offset}]`, plus `{id: null, name, detached: true}` for screen sessions left from before a daemon restart, and `{…, outside: true}` for screen sessions started some other way (by Claude, or at the desk) whose program runs in the project's folder |
 | POST | `/v1/terminals` | `{project?, session_id?, name?}` | A new shell in the project (or the chat's folder), or with `name` that screen session reattached |
-| DELETE | `/v1/terminals/{id}` (`?name=` for a detached one) | | Ends it, screen session included |
+| DELETE | `/v1/terminals/{id}` (`?name=` for a detached one) | | Ends it, screen session included; an `outside` one is only detached and keeps running |
 | WS | `/v1/terminals/{id}/stream?since=<offset>` | | First a JSON `{type: start, offset, reset, name, screen}`, then output as binary frames; `{type: exit}` when the shell ends. Send input as binary frames, and `{type: resize, cols, rows}` as text |
 
 The daemon keeps the last 512 KB of each shell's output. Offsets count every
@@ -180,7 +181,11 @@ transcript, Claude Code's own list at the end of its last turn (its `Stop`
 hook) decides for commands started before then; for newer ones, `running`
 means this daemon's Claude started it or its output is still growing.
 `GET /v1/sessions/{id}/tasks/{task}/output?since=` → `{start, size, text,
-reset}`: from byte `since`, or the last 256 KB with `reset`. The app shows
+reset}`: from byte `since`, or the last 256 KB with `reset`.
+While Claude runs in the chat, Claude Code reports each command starting and
+ending as it happens; that status wins, and `session.tasks` says to refetch.
+`POST /v1/sessions/{id}/tasks/{task}/stop` stops one through Claude Code (409
+when Claude isn't running in that chat). The app shows
 them as read-only tabs in the chat's Shell tab.
 
 ## Buttons
