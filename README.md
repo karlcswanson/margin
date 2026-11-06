@@ -197,6 +197,12 @@ sidesteps the question.
 
 ## Development
 
+Margin is easy to change while you use it: run the daemon from a Claude Code
+session in this repo and ask for changes; it tests, restarts the daemon or
+installs a new build, and the app picks it up. See
+[docs/development.md](docs/development.md); `CLAUDE.md` has the same rules
+for Claude.
+
 ```bash
 cd daemon && uv run pytest -q    # a fake SDK client: no Claude login needed
 ```
