@@ -1,0 +1,24 @@
+# A second workspace on the same computer: its own Claude Code login, projects
+# and token. One file + one daemon process each, each on its own port.
+
+[workspace]
+name = "Second"
+color = "#D9822B"
+bind = "0.0.0.0"
+port = 8790                    # every workspace on a computer gets its own port
+token_file = "~/.margin/second.tokens"
+
+# A separate Claude Code login/history/settings. At the desk, use the same folder:
+#   bash/zsh:   alias claude2='CLAUDE_CONFIG_DIR=~/.claude-second claude'
+#   PowerShell: function claude2 { $env:CLAUDE_CONFIG_DIR="$HOME\.claude-second"; claude @args }
+# Log in once with that alias (`claude2` then /login).
+claude_config_dir = "~/.claude-second"
+
+# Or bill it to its own API key instead of a subscription login:
+# api_key_env = "SECOND_ANTHROPIC_API_KEY"
+
+default_permission_mode = "default"
+
+[[project]]
+name = "website"
+path = "~/code/website"

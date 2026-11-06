@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Runs the margind daemon at login and keeps it running.
+  Install:
+    cp com.margin.main.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.margin.main.plist
+  Replace YOU with your user name and fix the paths below first (venv and config). Keep the Mac from sleeping
+  while you're away: System Settings → Energy → "Prevent automatic sleeping
+  when the display is off" (on power), or `caffeinate -s` while plugged in.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.margin.main</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/margin/daemon/.venv/bin/margind</string>
+    <string>serve</string>
+    <string>-c</string>
+    <string>/Users/YOU/margin/daemon/workspaces/main.toml</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd has a minimal PATH; Claude Code and your build tools must be on it. -->
+    <key>PATH</key><string>/Users/YOU/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>WorkingDirectory</key><string>/Users/YOU/margin/daemon</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOU/.margin/main.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/.margin/main.log</string>
+</dict>
+</plist>

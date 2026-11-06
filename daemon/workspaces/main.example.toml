@@ -1,0 +1,38 @@
+# A workspace: one daemon, one Claude Code login, the projects it may touch.
+# Run one on each computer you want to reach. Copy to main.toml (git-ignored)
+# and edit.
+
+[workspace]
+# machine = "Studio Mac"      # what the app calls this computer (default: its own name)
+name = "Main"
+color = "#3FA66B"
+# Where the app can reach it. "0.0.0.0" listens on every interface (your LAN,
+# and a VPN like ZeroTier or Tailscale); every request still needs a token.
+# Keep "127.0.0.1" if you put Caddy in front (see deploy/Caddyfile).
+bind = "0.0.0.0"
+port = 8787
+# One token per device. Generate with: margind token
+token_file = "~/.margin/main.tokens"
+# Leave unset to use the normal ~/.claude, so this is the same Claude Code you
+# use at the desk: same sessions, memory, CLAUDE.md, MCP servers.
+# claude_config_dir = "~/.claude"
+default_permission_mode = "default"
+idle_disconnect_minutes = 30
+
+# The folders Claude may work in. Chats started in a project's folder (or
+# below it) at the desk show up under it in the app too.
+[[project]]
+name = "my-app"
+path = "~/code/my-app"
+
+[[project]]
+name = "firmware"
+path = "~/code/firmware"
+
+# Push notifications (optional). Key from developer.apple.com → Keys → APNs.
+# [apns]
+# team_id   = "ABCDE12345"
+# key_id    = "XYZ987WVU6"
+# key_path  = "~/.margin/AuthKey_XYZ987WVU6.p8"
+# bundle_id = "com.example.margin"   # MARGIN_BUNDLE_ID in ios/Signing.xcconfig
+# sandbox   = true   # true for Xcode/dev builds, false for TestFlight/App Store

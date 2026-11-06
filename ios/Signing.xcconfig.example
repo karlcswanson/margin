@@ -1,0 +1,8 @@
+// Copy this file to Signing.xcconfig and fill in your Team ID and a bundle id
+// of your own (reverse DNS of a domain you control). Signing.xcconfig is
+// git-ignored so both stay local.
+
+DEVELOPMENT_TEAM = YOUR_TEAM_ID_HERE
+CODE_SIGN_STYLE = Automatic
+// Must match `bundle_id` under [apns] in your workspace TOML if you use push.
+MARGIN_BUNDLE_ID = com.example.margin

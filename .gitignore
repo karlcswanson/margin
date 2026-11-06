@@ -1,0 +1,22 @@
+# daemon
+daemon/.venv/
+daemon/*.egg-info/
+__pycache__/
+daemon/workspaces/*.toml
+!daemon/workspaces/*.example.toml
+*.tokens
+*.p8
+
+# ios
+ios/Margin.xcodeproj/
+ios/Margin/Info.plist
+xcuserdata/
+DerivedData/
+.DS_Store
+ios/Signing.xcconfig
+ios/build/
+ios/build-sim/
+ref/
+
+# Margin's own files in a project folder (markups, buttons)
+.margin/

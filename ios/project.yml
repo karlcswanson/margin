@@ -1,0 +1,147 @@
+# Generate the Xcode project with XcodeGen:
+#   brew install xcodegen
+#   cd ios && xcodegen
+#   open Margin.xcodeproj
+# Copy Signing.xcconfig.example to Signing.xcconfig and set your Team ID and bundle id first.
+
+name: Margin
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.18.0      # terminal emulator for the Shell tab (1.19+ adds a build plugin Xcode must be told to trust)
+  SwiftMarkdown:
+    url: https://github.com/swiftlang/swift-markdown
+    exactVersion: 0.7.3       # Apple's CommonMark + GitHub-flavoured parser (DocC uses it)
+  SwiftTreeSitter:
+    url: https://github.com/tree-sitter/swift-tree-sitter
+    exactVersion: 0.25.0      # syntax colouring; the grammar packages below depend on this URL
+  # tree-sitter grammars: each ships its parser (C) and highlights.scm
+  TreeSitterSwift:
+    url: https://github.com/alex-pinkus/tree-sitter-swift
+    revision: 82bb3a533e0801fd2bbaa11dc49676e10bf41948   # 0.7.4-with-generated-files
+  TreeSitterPython:
+    url: https://github.com/tree-sitter/tree-sitter-python
+    exactVersion: 0.23.6      # newer manifests drop scanner.c when Xcode builds them
+  TreeSitterJavaScript:
+    url: https://github.com/tree-sitter/tree-sitter-javascript
+    exactVersion: 0.23.1      # newer manifests drop scanner.c when Xcode builds them
+  TreeSitterTypeScript:
+    url: https://github.com/tree-sitter/tree-sitter-typescript
+    exactVersion: 0.23.2
+  TreeSitterRust:
+    url: https://github.com/tree-sitter/tree-sitter-rust
+    exactVersion: 0.24.2
+  TreeSitterGo:
+    url: https://github.com/tree-sitter/tree-sitter-go
+    exactVersion: 0.25.0
+  TreeSitterC:
+    url: https://github.com/tree-sitter/tree-sitter-c
+    exactVersion: 0.24.2
+  TreeSitterCPP:
+    url: https://github.com/tree-sitter/tree-sitter-cpp
+    exactVersion: 0.23.4
+  TreeSitterJava:
+    url: https://github.com/tree-sitter/tree-sitter-java
+    exactVersion: 0.23.5
+  TreeSitterJSON:
+    url: https://github.com/tree-sitter/tree-sitter-json
+    exactVersion: 0.24.8
+  TreeSitterBash:
+    url: https://github.com/tree-sitter/tree-sitter-bash
+    exactVersion: 0.25.1
+  TreeSitterHTML:
+    url: https://github.com/tree-sitter/tree-sitter-html
+    exactVersion: 0.23.2
+  TreeSitterCSS:
+    url: https://github.com/tree-sitter/tree-sitter-css
+    exactVersion: 0.23.2      # newer manifests drop scanner.c when Xcode builds them
+  TreeSitterRuby:
+    url: https://github.com/tree-sitter/tree-sitter-ruby
+    exactVersion: 0.23.1
+  TreeSitterPHP:
+    url: https://github.com/tree-sitter/tree-sitter-php
+    exactVersion: 0.25.1
+  TreeSitterLua:
+    url: https://github.com/tree-sitter-grammars/tree-sitter-lua
+    exactVersion: 0.3.0      # newer manifests drop scanner.c when Xcode builds them
+  TreeSitterTOML:
+    url: https://github.com/tree-sitter-grammars/tree-sitter-toml
+    exactVersion: 0.7.0
+  TreeSitterYAML:
+    url: https://github.com/tree-sitter-grammars/tree-sitter-yaml
+    exactVersion: 0.7.0      # newer manifests drop scanner.c when Xcode builds them
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Margin:
+    type: application
+    platform: iOS
+    configFiles:
+      Debug: Signing.xcconfig      # team ID, git-ignored (copy Signing.xcconfig.example)
+      Release: Signing.xcconfig
+    sources:
+      - path: Margin
+    dependencies:
+      - package: SwiftTerm
+      - package: SwiftMarkdown
+        product: Markdown
+      - package: SwiftTreeSitter
+        product: SwiftTreeSitter
+      - package: TreeSitterSwift
+      - package: TreeSitterPython
+      - package: TreeSitterJavaScript
+      - package: TreeSitterTypeScript     # TypeScript and TSX
+      - package: TreeSitterRust
+      - package: TreeSitterGo
+      - package: TreeSitterC
+      - package: TreeSitterCPP
+      - package: TreeSitterJava
+      - package: TreeSitterJSON
+      - package: TreeSitterBash
+      - package: TreeSitterHTML
+      - package: TreeSitterCSS
+      - package: TreeSitterRuby
+      - package: TreeSitterPHP
+      - package: TreeSitterLua
+      - package: TreeSitterTOML
+      - package: TreeSitterYAML
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MARGIN_BUNDLE_ID)   # set in Signing.xcconfig (must match apns.bundle_id in margind)
+        TARGETED_DEVICE_FAMILY: "1,2"                   # iPhone + iPad (iPad-first layout)
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES      # runs on Apple Silicon Macs as-is
+        CODE_SIGN_ENTITLEMENTS: Margin/Margin.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon      # light, dark and tinted (sources in design/icon)
+        ENABLE_PREVIEWS: YES
+    info:
+      path: Margin/Info.plist
+      properties:
+        CFBundleDisplayName: Margin
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIBackgroundModes:
+          - remote-notification
+        CFBundleURLTypes:
+          - CFBundleURLName: margin
+            CFBundleURLSchemes: [margin]
+        NSMicrophoneUsageDescription: Margin records your voice to dictate tasks and replies to Claude.
+        NSSpeechRecognitionUsageDescription: Margin turns your voice into text on this device.
+        NSLocalNetworkUsageDescription: Margin connects to Claude Code hosts on your private network.
+        NSAppTransportSecurity:
+          # HTTPS is required for hosts (see README: Caddy + DNS challenge).
+          # Local networking stays allowed so the Simulator can reach http://127.0.0.1.
+          NSAllowsLocalNetworking: true

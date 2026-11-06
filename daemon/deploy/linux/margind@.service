@@ -1,0 +1,20 @@
+# systemd user unit for a bench Raspberry Pi (or any Linux host).
+# Install:
+#   mkdir -p ~/.config/systemd/user && cp margind@.service ~/.config/systemd/user/
+#   systemctl --user enable --now margind@main
+#   sudo loginctl enable-linger $USER     # keep running without a login
+# %i is the config name: workspaces/%i.toml
+
+[Unit]
+Description=Margin daemon (%i)
+After=network-online.target zerotier-one.service
+
+[Service]
+WorkingDirectory=%h/margin/daemon
+ExecStart=%h/margin/daemon/.venv/bin/margind serve -c %h/margin/daemon/workspaces/%i.toml
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
