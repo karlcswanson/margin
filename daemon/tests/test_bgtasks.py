@@ -56,6 +56,9 @@ def test_reads_claude_codes_background_commands(tmp_path, monkeypatch):
     import os
     old = time.time() - 3600
     os.utime(out / "bserve123.output", (old, old))
+    # Quiet output, but Claude Code said at the end of its turn that it's still running.
+    assert {t["id"]: t["status"] for t in b.list(sid, seen=(time.time(), {"bserve123": "running"}))}["bserve123"] == "running"
+    assert {t["id"]: t["status"] for t in b.list(sid, seen=(time.time(), {}))}["bserve123"] == "stopped"
     with open(transcript, "a") as f:
         _line(f, {"type": "user", "message": {"content": "<task-notification>\n<task-id>bserve123</task-id>\n"
                   "<status>killed</status>\n</task-notification>"}})

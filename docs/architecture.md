@@ -47,8 +47,10 @@
   you at a file, line or diff; `suggest_replies` offers replies to tap;
   `publish_page` adds a page to the Preview tab; `set_action` adds a button for
   a command. None of them take focus.
-- **Hooks**, through the SDK, that keep Claude from opening windows on the host
-  and remind it you're reading on a tablet.
+- **Hooks**, through the SDK, that keep Claude from opening windows on the host,
+  remind it you're reading on a tablet, send it back to answer when it offered
+  replies instead, and pass on Claude Code's notifications, its running
+  commands and its scheduled wakeups.
 - **Ideas and offline reading:** notes per project, and a copy of recent chats
   on the device.
 

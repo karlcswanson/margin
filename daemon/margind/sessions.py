@@ -39,13 +39,17 @@ from claude_agent_sdk import get_session_info, get_session_messages, list_sessio
 
 from . import normalize, scope
 from .proposals import ProposalStore
-from . import actions, ideas
+from . import actions, crons, ideas
 from .published import PublishedStore, PublishError, parse_local_url
 from .config import WorkspaceConfig
 from .events import EventBus
 
 log = logging.getLogger("margind.sessions")
 INTERRUPTED = "The user interrupted (Esc). Stop and wait for their next instruction."
+UNANSWERED = ("You offered replies under the conversation, but they don't carry your answer and the user can't "
+              "see one. If they asked you something you haven't answered in text, answer it now. If you have, "
+              "or you only asked them a question, end your turn without writing anything more.")
+APPROVAL_PUSH_AFTER = 15.0   # seconds: push an approval Claude Code hasn't raised a notification for by then
 
 ClientFactory = Callable[[ClaudeAgentOptions], Any]
 Notifier = Callable[[dict[str, Any]], Awaitable[None]]
@@ -186,6 +190,8 @@ class PendingPermission:
     suggestions: list[Any]
     future: asyncio.Future
     proposal_id: str | None = None
+    push: dict[str, Any] | None = None        # its push, until sent
+    push_timer: asyncio.Task | None = None
 
     def public(self) -> dict[str, Any]:
         return {
@@ -215,6 +221,7 @@ class LiveSession:
         self.reconnect = False          # effort changed: next prompt starts a fresh client
         self.turn: dict[str, Any] | None = None   # while working: since when, tokens, what it's doing
         self.wrote = False                         # wrote the user text since its last command this turn
+        self.offered: bool | None = None           # offered replies this turn: had it written an answer first?
         self.status = "starting"
         self.queue: asyncio.Queue[str] = asyncio.Queue()     # message ids, in order
         self.queued: dict[str, str] = {}                      # id -> text, until sent (or cancelled)
@@ -240,6 +247,8 @@ class LiveSession:
             hooks={
                 "PreToolUse": [HookMatcher(matcher="Bash", hooks=[_block_host_display])],
                 "UserPromptSubmit": [HookMatcher(hooks=[self._remind_remote])],
+                "Stop": [HookMatcher(hooks=[self._on_stop])],
+                "Notification": [HookMatcher(hooks=[self._on_notification])],
             },
             model=self.model,
             mcp_servers={"margin": self._margin_server()},
@@ -390,6 +399,7 @@ class LiveSession:
                 return _tool_text("Give at least one option.", True)
             mgr.replies[sess.session_id] = opts
             mgr.bus.publish("session.replies", session_id=sess.session_id, replies=opts)
+            sess.offered = sess.wrote
             if not sess.wrote:
                 return _tool_text("Offered under the conversation. You haven't answered the user since your last "
                                   "command: the replies don't answer them. Write your full answer now, as text.")
@@ -423,8 +433,9 @@ class LiveSession:
                 try:
                     first = await asyncio.wait_for(self.queue.get(), timeout=idle)
                 except asyncio.TimeoutError:
-                    if self.turn is not None:      # still working on something it started itself
-                        continue
+                    if self.turn is not None or self.mgr.crons.get(self.session_id):
+                        continue                   # working on something it started itself, or will
+
                     break
                 prompt = self._take(first)
                 if prompt is None:
@@ -457,6 +468,8 @@ class LiveSession:
                     pass
             if self.turn is not None:
                 self._end_turn()
+            self.mgr.claude_tasks.pop(self.session_id, None)    # they end with the Claude process
+            self.mgr.set_crons(self.session_id, [])
             self._set_status("closed")
             self.mgr.live.pop(self.session_id, None)
 
@@ -545,11 +558,49 @@ class LiveSession:
             note += "\n\n" + report
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": note}}
 
+    async def _on_stop(self, input_data: dict[str, Any], tool_use_id: str | None,
+                       context: Any) -> dict[str, Any]:
+        # Claude Code's own account, at the end of each turn, of what's still
+        # running and when it will wake itself up.
+        self.mgr.claude_tasks[self.session_id] = (time.time(), {
+            str(t.get("id")): str(t.get("status") or "running")
+            for t in input_data.get("background_tasks") or [] if t.get("type") == "shell"})
+        self.mgr.set_crons(self.session_id, input_data.get("session_crons") or [])
+        if not input_data.get("stop_hook_active") and self._unanswered(str(input_data.get("last_assistant_message") or "")):
+            self.offered = None
+            return {"decision": "block", "reason": UNANSWERED}
+        return {}
+
+    def _unanswered(self, last: str) -> bool:
+        """Offered replies and stopped without an answer: nothing written since
+        its last command, or only a line after the replies ("they're below")."""
+        if self.offered is None:
+            return False
+        return len(last.strip()) < 300 and (not self.wrote or not self.offered)
+
+    async def _on_notification(self, input_data: dict[str, Any], tool_use_id: str | None,
+                               context: Any) -> dict[str, Any]:
+        kind = str(input_data.get("notification_type") or "")
+        if kind == "permission_prompt":
+            # Claude Code's moment to tell you an approval is waiting (it gives
+            # you a few seconds first): push the ones not pushed yet.
+            for req in [p for p in self.mgr.pending.values() if p.session_id == self.session_id]:
+                await self.mgr.push_pending(req)
+        elif kind != "idle_prompt":         # the "done" push already says so
+            await self.mgr.notify({
+                "kind": "notification", "session_id": self.session_id,
+                "title": f"{self.mgr.ws.name}: {input_data.get('title') or 'Claude Code'}"
+                         + (f" · {self.project}" if self.project else ""),
+                "body": str(input_data.get("message") or "")[:180],
+            })
+        return {}
+
     # -- what it's doing right now (Claude Code's spinner line) -------------
     def _begin_turn(self) -> None:
         self.turn = {"started_at": time.time(), "tokens": 0, "doing": "Thinking", "detail": ""}
         self._turn_usage: dict[str, int] = {}
         self.wrote = False
+        self.offered = None
         self._publish_turn()
 
     def _end_turn(self) -> None:
@@ -642,14 +693,14 @@ class LiveSession:
             prop = self.mgr.proposals.add(self.session_id, self.project, str(tool_input.get("plan") or ""), req.id)
             req.proposal_id = prop.id
             self.mgr.bus.publish("proposal", proposal=prop.public())
-            await self.mgr.notify({
+            self.mgr.push_later(req, {
                 "kind": "proposal", "session_id": self.session_id, "proposal_id": prop.id,
                 "title": f"{self.mgr.ws.name}: proposal ready" + (f" · {self.project}" if self.project else ""),
                 "body": prop.title + (f" (v{prop.version})" if prop.version > 1 else ""),
             })
         else:
             self.mgr.bus.publish("permission.request", **req.public())
-            await self.mgr.notify({
+            self.mgr.push_later(req, {
                 "kind": "permission", "session_id": self.session_id, "request_id": req.id,
                 "title": f"{self.mgr.ws.name}: approve {tool_name}?",
                 "body": req.title or _one_line(tool_input),
@@ -658,6 +709,8 @@ class LiveSession:
             decision, message, always = await req.future
         finally:
             self.mgr.pending.pop(req.id, None)
+            if req.push_timer:
+                req.push_timer.cancel()
             if req.proposal_id is None:
                 self.mgr.bus.publish("permission.resolved", request_id=req.id, session_id=self.session_id)
             if self.status == "waiting":
@@ -722,6 +775,10 @@ class SessionManager:
         self.published = PublishedStore(ws.state_path / "published.json")
         self.shows: dict[str, list[dict[str, Any]]] = {}   # session id -> what Claude pointed at, oldest first
         self.replies: dict[str, list[str]] = {}             # session id -> replies Claude offered
+        self.crons: dict[str, list[dict[str, Any]]] = {}     # session id -> wakeups Claude scheduled
+        # session id -> (when, {task id: status}): its background commands, at the end of its last turn
+        self.claude_tasks: dict[str, tuple[float, dict[str, str]]] = {}
+        self.approval_push_after = APPROVAL_PUSH_AFTER
         self._models_task: asyncio.Task | None = None
         self.started_at = time.time()
         # session id -> path -> (shown, detail): what the app could and couldn't display
@@ -734,6 +791,33 @@ class SessionManager:
                 await self._notifier(payload)
             except Exception:
                 log.exception("notification failed")
+
+    def push_later(self, req: PendingPermission, payload: dict[str, Any]) -> None:
+        """An approval or plan is pushed when Claude Code raises its own
+        notification for it (a few seconds in, so not while you're answering
+        it already), or after APPROVAL_PUSH_AFTER if it never does."""
+        req.push = payload
+
+        async def fallback() -> None:
+            await asyncio.sleep(self.approval_push_after)
+            await self.push_pending(req)
+        req.push_timer = asyncio.create_task(fallback())
+
+    async def push_pending(self, req: PendingPermission) -> None:
+        payload, req.push = req.push, None
+        if payload and req.id in self.pending:
+            await self.notify(payload)
+
+    def set_crons(self, session_id: str, found: list[dict[str, Any]]) -> None:
+        items = [{"id": str(c.get("id")), "schedule": str(c.get("schedule") or ""),
+                  "recurring": bool(c.get("recurring")), "prompt": str(c.get("prompt") or "")[:300],
+                  "next_at": crons.next_fire(str(c.get("schedule") or ""))} for c in found]
+        if items != self.crons.get(session_id, []):
+            if items:
+                self.crons[session_id] = items
+            else:
+                self.crons.pop(session_id, None)
+            self.bus.publish("session.crons", session_id=session_id, crons=items)
 
     # -- starting / talking ----------------------------------------------
     def _mode(self, permission_mode: str | None, session_id: str | None = None) -> str:

@@ -227,7 +227,7 @@ def create_app(ws: WorkspaceConfig, manager: SessionManager | None = None,
         live = manager.live.get(session_id)
         return {"session_id": session_id, "items": items, "queued": manager.queue_of(session_id),
                 "shows": manager.shows.get(session_id, []), "replies": manager.replies.get(session_id, []),
-                "activity": live.turn if live else None,
+                "crons": manager.crons.get(session_id, []), "activity": live.turn if live else None,
                 "status": live.status if live else "stored", "seq": bus.seq}
 
     @app.post("/v1/sessions/{session_id}/messages", dependencies=[Depends(auth)])
@@ -348,7 +348,7 @@ def create_app(ws: WorkspaceConfig, manager: SessionManager | None = None,
                 if not sid:
                     continue
                 if sid not in tasks:
-                    tasks[sid] = background.list(sid, _live_since(sid))
+                    tasks[sid] = background.list(sid, _live_since(sid), manager.claude_tasks.get(sid))
                 cmd = str(it.get("claude_command") or "").strip()
                 t = next((t for t in tasks[sid] if t["command"].strip() == cmd), None)
                 if t:
@@ -532,7 +532,8 @@ def create_app(ws: WorkspaceConfig, manager: SessionManager | None = None,
 
     @app.get("/v1/sessions/{session_id}/tasks", dependencies=[Depends(auth)])
     async def background_tasks(session_id: str) -> list[dict[str, Any]]:
-        return await asyncio.to_thread(background.list, session_id, _live_since(session_id))
+        return await asyncio.to_thread(background.list, session_id, _live_since(session_id),
+                                       manager.claude_tasks.get(session_id))
 
     @app.get("/v1/sessions/{session_id}/tasks/{task_id}/output", dependencies=[Depends(auth)])
     async def background_output(session_id: str, task_id: str, since: int | None = None) -> dict[str, Any]:

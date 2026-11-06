@@ -353,6 +353,7 @@ struct SessionView: View {
             }
             pointers
             replies
+            wakeups
             if let p = ws.latestProposal(for: sessionId), p.isPending {
                 Button { openProposal = p.id } label: {
                     HStack(spacing: 10) {
@@ -638,6 +639,27 @@ struct SessionView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// When Claude will check back on its own (a wakeup it scheduled), like
+    /// Claude Code's line under the prompt.
+    @ViewBuilder private var wakeups: some View {
+        let next = (ws.wakeups[sessionId] ?? []).filter { $0.nextAt != nil }.min { $0.nextAt! < $1.nextAt! }
+        if let w = next, let at = w.nextAt {
+            let date = Date(timeIntervalSince1970: at)
+            let when = Calendar.current.isDateInToday(date)
+                ? date.formatted(date: .omitted, time: .shortened)
+                : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+            HStack(spacing: 6) {
+                Image(systemName: w.recurring ? "repeat" : "alarm")
+                Text("Claude will check back at \(when)")
+                if !w.prompt.isEmpty {
+                    Text("· \(w.prompt)").foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
+            .font(Theme.Fonts.caption).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

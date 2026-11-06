@@ -366,9 +366,19 @@ struct HistoryResponse: Codable {
     var queued: [QueuedMessage]?
     var shows: [ShowItem]?
     var replies: [String]?
+    var crons: [Wakeup]?
     var activity: Activity?
     var status: String
     var seq: Int
+}
+
+/// A wakeup Claude scheduled for itself in a chat (Claude Code's session cron).
+struct Wakeup: Codable, Hashable, Identifiable {
+    var id: String
+    var schedule: String
+    var recurring: Bool
+    var prompt: String
+    var nextAt: Double?
 }
 
 /// Every event on /v1/events. Fields are optional because each type uses a subset.
@@ -435,6 +445,8 @@ struct ServerEvent: Decodable {
     // session.show, session.replies
     var shows: [ShowItem]?
     var replies: [String]?
+    // session.crons
+    var crons: [Wakeup]?
 
     var permission: PermissionRequest? {
         guard type == "permission.request", let r = requestId, let s = sessionId, let t = toolName else { return nil }

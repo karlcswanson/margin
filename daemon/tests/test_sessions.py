@@ -96,12 +96,14 @@ def test_full_turn_with_approval():
                 notes.append(p)
 
             mgr = SessionManager(ws, bus, client_factory=FakeClient, notifier=notifier)
+            mgr.approval_push_after = 0.05
             sid = await mgr.start("pcb", "run DRC", permission_mode="default")
             events = lambda: bus.replay(0)
 
             req = await _wait_for(events, lambda e: e["type"] == "permission.request")
             assert req["tool_name"] == "Bash" and req["session_id"] == sid
-            assert any(n["kind"] == "permission" for n in notes)
+            await asyncio.sleep(0.1)    # no notification from Claude Code: pushed anyway
+            assert [n["kind"] for n in notes] == ["permission"]
             assert mgr.live[sid].status == "waiting"
 
             mgr.resolve_permission(req["request_id"], "allow")
@@ -480,3 +482,131 @@ def test_what_claude_is_doing_like_the_spinner_line():
         sess._end_turn()
         acts = [e["activity"] for e in bus.replay(0) if e["type"] == "session.activity"]
         assert acts[0]["doing"] == "Thinking" and acts[-1] is None
+
+
+def test_stop_sends_back_replies_without_an_answer():
+    from margind.sessions import LiveSession
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ws = make_ws(tmp)
+        mgr = SessionManager(ws, EventBus(), client_factory=FakeClient)
+        sess = LiveSession(mgr, "s1", "pcb", ws.projects[0].path, resume=False, permission_mode="default")
+        replies = {t.name: t for t in sess.margin_tools()}["suggest_replies"]
+        stop = lambda last, active=False: asyncio.run(sess._on_stop(
+            {"stop_hook_active": active, "last_assistant_message": last}, None, None))
+        text = lambda t, mid: sess._track(AssistantMessage(content=[TextBlock(text=t)], model="m", message_id=mid))
+
+        # No replies offered: a short ending is fine.
+        sess._begin_turn()
+        text("Done.", "a")
+        assert stop("Done.") == {}
+
+        # Replies offered and nothing written since the last command: sent back, once.
+        sess._begin_turn()
+        asyncio.run(replies.handler({"options": ["Yes", "No"]}))
+        assert stop("")["decision"] == "block"
+        assert stop("", active=True) == {}
+
+        # Only a line after the replies ("they're below"): sent back.
+        sess._begin_turn()
+        asyncio.run(replies.handler({"options": ["Yes", "No"]}))
+        text("The options are under this message.", "b")
+        assert stop("The options are under this message.")["decision"] == "block"
+
+        # A question, then replies for it: that's the turn's point.
+        sess._begin_turn()
+        text("Ship it to the fab now, or wait for the DRC fix?", "c")
+        asyncio.run(replies.handler({"options": ["Ship it", "Wait"]}))
+        assert stop("Ship it to the fab now, or wait for the DRC fix?") == {}
+
+        # A full answer after the replies.
+        sess._begin_turn()
+        asyncio.run(replies.handler({"options": ["Yes", "No"]}))
+        answer = "It needs Go 1.25 because " + "the module uses range-over-func iterators. " * 10
+        text(answer, "d")
+        assert stop(answer) == {}
+
+
+def test_stop_reports_background_commands_and_wakeups():
+    from margind import crons
+    from margind.sessions import LiveSession
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ws = make_ws(tmp)
+        bus = EventBus()
+        mgr = SessionManager(ws, bus, client_factory=FakeClient)
+        sess = LiveSession(mgr, "s1", "pcb", ws.projects[0].path, resume=False, permission_mode="default")
+        asyncio.run(sess._on_stop({"stop_hook_active": False, "last_assistant_message": "Started.",
+                                   "background_tasks": [
+                                       {"id": "b1", "type": "shell", "status": "running", "description": "dev", "command": "npm run dev"},
+                                       {"id": "a1", "type": "subagent", "status": "running", "description": "x"}],
+                                   "session_crons": [{"id": "c1", "schedule": "40 15 * * *", "recurring": False,
+                                                      "prompt": "check the build"}]}, None, None))
+        at, found = mgr.claude_tasks["s1"]
+        assert found == {"b1": "running"}
+        (c,) = mgr.crons["s1"]
+        assert c["prompt"] == "check the build" and c["next_at"] == crons.next_fire("40 15 * * *")
+        assert [e["crons"] for e in bus.replay(0) if e["type"] == "session.crons"] == [[c]]
+        # The same list again publishes nothing; none left clears it.
+        asyncio.run(sess._on_stop({"stop_hook_active": False, "session_crons": [c]}, None, None))
+        asyncio.run(sess._on_stop({"stop_hook_active": False}, None, None))
+        assert "s1" not in mgr.crons and mgr.claude_tasks["s1"][1] == {}
+        assert [e["crons"] for e in bus.replay(0) if e["type"] == "session.crons"] == [[c], []]
+
+
+def test_next_cron_fire():
+    from datetime import datetime
+
+    from margind.crons import next_fire
+
+    base = datetime(2026, 11, 5, 15, 10).timestamp()     # a Thursday
+    at = lambda e: datetime.fromtimestamp(next_fire(e, base))
+    assert at("40 15 * * *") == datetime(2026, 11, 5, 15, 40)
+    assert at("*/15 * * * *") == datetime(2026, 11, 5, 15, 15)
+    assert at("0 9 * * 1-5") == datetime(2026, 11, 6, 9, 0)
+    assert at("0 9 * * 0") == at("0 9 * * 7") == datetime(2026, 11, 8, 9, 0)
+    assert at("0 0 1 1 *") == datetime(2027, 1, 1, 0, 0)
+    assert next_fire("nonsense") is None and next_fire("0 0 31 2 *") is None
+
+
+def test_approvals_push_on_claude_codes_notification():
+    from margind.sessions import LiveSession
+
+    async def run():
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = make_ws(tmp)
+            notes = []
+
+            async def notifier(p):
+                notes.append(p)
+
+            mgr = SessionManager(ws, EventBus(), client_factory=FakeClient, notifier=notifier)
+            sess = LiveSession(mgr, "s1", "pcb", ws.projects[0].path, resume=False, permission_mode="default")
+            ctx = ToolPermissionContext(suggestions=[])
+
+            # Answered before Claude Code raises its notification: no push.
+            ask = asyncio.create_task(sess._can_use_tool("Bash", {"command": "make"}, ctx))
+            await asyncio.sleep(0.01)
+            (req,) = mgr.pending.values()
+            mgr.resolve_permission(req.id, "allow")
+            await ask
+            assert notes == []
+
+            # Still waiting when it does: one push, not two.
+            ask = asyncio.create_task(sess._can_use_tool("Bash", {"command": "make flash"}, ctx))
+            await asyncio.sleep(0.01)
+            note = {"message": "Claude needs your permission to use Bash", "notification_type": "permission_prompt"}
+            await sess._on_notification(note, None, None)
+            await sess._on_notification(note, None, None)
+            assert [(n["kind"], n["body"]) for n in notes] == [("permission", "make flash")]
+            (req,) = mgr.pending.values()
+            mgr.resolve_permission(req.id, "deny")
+            await ask
+
+            # Other notifications pass through in Claude Code's words; idle is the "done" push's job.
+            await sess._on_notification({"message": "Sign in again", "title": "Auth",
+                                         "notification_type": "auth_expired"}, None, None)
+            await sess._on_notification({"message": "Waiting for input", "notification_type": "idle_prompt"}, None, None)
+            assert notes[-1]["kind"] == "notification" and notes[-1]["body"] == "Sign in again"
+            assert notes[-1]["title"] == "Personal: Auth · pcb" and len(notes) == 2
+    asyncio.run(run())

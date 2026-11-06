@@ -10,7 +10,7 @@ One daemon process = one workspace. All requests need
 | GET | `/v1/info` | | `{workspace, slug, color, host, machine, version, projects:[{name,path}], default_permission_mode, push, seq, boot, renders, step, tls}` (`machine`: what the app calls this computer; `boot`: changes on every daemon start, so the app knows event numbers restarted; `renders`: kicad-cli found; `step`: an OpenCascade Python found) |
 | GET | `/v1/sessions` | `?project=&limit=` | `[{session_id, project, title, first_prompt, git_branch, cwd, last_modified, created_at, status, pending_permissions, proposal?}]`, most recently changed first |
 | POST | `/v1/sessions` | `{project, prompt, permission_mode?}` | `{session_id}` |
-| GET | `/v1/sessions/{id}/messages` | | `{session_id, items:[Item], queued:[{id, text}], status, seq}` (stored transcript) |
+| GET | `/v1/sessions/{id}/messages` | | `{session_id, items:[Item], queued:[{id, text}], shows, replies, crons, activity, status, seq}` (stored transcript) |
 | POST | `/v1/sessions/{id}/messages` | `{text, permission_mode?}` | `{ok}` (resumes a stored session if needed). While Claude works the message is queued; everything queued goes as one prompt when the turn ends |
 | DELETE | `/v1/sessions/{id}/queue/{queue_id}` | | `{ok}`; 404 once it was sent |
 | POST | `/v1/sessions/{id}/display` | `{items:[{path, ok, detail?}]}` | `{ok}`: what the app could show of the files Claude referenced; changes reach Claude with the next prompt as a "[Margin display report]" |
@@ -96,6 +96,7 @@ permissions, open transcripts).
 | `session.settings` | `session_id, settings` |
 | `session.replies` | `session_id, replies:[string]` (Claude's suggested replies; `[]` once you send something) |
 | `session.show` | `session_id, shows:[{id, title, url?, file?, note?}]` |
+| `session.crons` | `session_id, crons:[{id, schedule, recurring, prompt, next_at}]` (wakeups Claude scheduled; `next_at` in local time, or null) |
 | `proposal` | `proposal` (a plan presented, decided or finished) |
 | `published` | `project, session_id, pages` |
 | `actions` | `project, actions` |
@@ -117,6 +118,12 @@ permissions, open transcripts).
 
 Only a title and one line go through Apple. Categories: `APPROVAL` (Allow / Deny
 actions), `PROPOSAL`, `RESULT`, `GENERAL`.
+
+Approvals and plans are pushed when Claude Code raises its own notification
+for them (`permission_prompt`, a few seconds in), or after 15 s if it doesn't;
+one answered before then sends no push. Claude Code's other notifications go
+out in its own words (`GENERAL`), except `idle_prompt`, which the `RESULT`
+push already covers.
 
 ## On the host computer
 
@@ -168,8 +175,10 @@ What Claude Code already keeps, read as is: a session's Bash commands run
 with `run_in_background` (from its transcript) and their output files.
 `GET /v1/sessions/{id}/tasks` → `[{id, command, description, status, summary,
 started_at, size}]`, newest first; `status` is Claude Code's own ending
-(completed, failed, killed, stopped) or `running` (no ending yet, and either
-this daemon's Claude started it or its output is still growing).
+(completed, failed, killed, stopped) or `running`. With no ending in the
+transcript, Claude Code's own list at the end of its last turn (its `Stop`
+hook) decides for commands started before then; for newer ones, `running`
+means this daemon's Claude started it or its output is still growing.
 `GET /v1/sessions/{id}/tasks/{task}/output?since=` → `{start, size, text,
 reset}`: from byte `since`, or the last 256 KB with `reset`. The app shows
 them as read-only tabs in the chat's Shell tab.
@@ -209,4 +218,14 @@ message box and never takes focus; `DELETE /v1/sessions/{id}/show?id=` removes
 one (without `id`, all of them).
 
 `suggest_replies {options}` offers up to four replies you can tap; they arrive
-as `session.replies` and clear when you send anything.
+as `session.replies` and clear when you send anything. If Claude ends a turn
+having offered replies without writing an answer (nothing since its last
+command, or only a short line after the replies), its `Stop` hook sends it back
+once to answer.
+
+## Scheduled wakeups
+
+When Claude schedules itself to check back (Claude Code's session crons), the
+chat's `crons` (history response and `session.crons`) list them with the next
+time each fires. The daemon keeps that chat's Claude running while any are
+scheduled, so they fire as they would at the desk.
