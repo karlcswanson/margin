@@ -25,7 +25,9 @@ struct RootView: View {
     @State private var showAdd = false
     @State private var newTaskIn: UUID??
     @State private var seed: NewTaskSeed?
-    @State private var columns: NavigationSplitViewVisibility = .all
+    // Simulator screenshots: SIMCTL_CHILD_MARGIN_SIDEBAR=hide starts with the sidebar out of the way.
+    @State private var columns: NavigationSplitViewVisibility =
+        ProcessInfo.processInfo.environment["MARGIN_SIDEBAR"] == "hide" ? .detailOnly : .all
     @State private var filter = ""
     @AppStorage("sidebar.collapsed") private var collapsedRaw = ""     // folded projects, "ws/project" per line
     @AppStorage("sidebar.order") private var orderRaw = ""             // projects moved by hand, "ws/project" per line, in order
@@ -163,6 +165,7 @@ struct RootView: View {
                 } actions: {
                     Button("Add workspace") { showAdd = true }.buttonStyle(.borderedProminent)
                 }
+                .background(.background)        // covers the folio, not drawn over it
             }
         }
     }

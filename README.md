@@ -38,6 +38,7 @@ line `if p.Index < 0`"), so Claude can act on it.
 - **Voice.** Dictate messages and replies, with iPadOS 26's on-device speech
   analyzer where available.
 - **iPad first, iPhone too.** The same app works on iPhone and on Apple Silicon Macs.
+  On iPhone Duo it's the iPhone layout folded and the iPad one open.
 
 | | |
 |---|---|
@@ -47,6 +48,7 @@ line `if p.Index < 0`"), so Claude can act on it.
 | ![Changes since a commit, ready to comment on](docs/images/changes.jpg) | ![A board render marked up with the Pencil](docs/images/markup.jpg) |
 | ![A project's ideas, waiting to be brought into a chat](docs/images/ideas.jpg) | ![A chat read offline; what you write is kept as an idea](docs/images/offline.jpg) |
 | ![Source with tree-sitter colouring](docs/images/code.jpg) | <img src="docs/images/iphone.jpg" width="300" alt="The same chat on iPhone"> |
+| <img src="docs/images/duo-plan.jpg" width="400" alt="A plan waiting for your decision, on iPhone Duo opened in portrait"> | <img src="docs/images/duo-shell.jpg" width="400" alt="top in a shell on the host, with the keyboard and its terminal keys, on iPhone Duo opened in portrait"> |
 
 ## How it works
 
@@ -213,7 +215,7 @@ Debug builds of the app take a few launch settings, handy with the Simulator
 (`SIMCTL_CHILD_<name>=… xcrun simctl launch …`): `MARGIN_ADD` (a pairing link),
 `MARGIN_OPEN` (`<workspace>/session/<id>`, `<workspace>/proposal/<id>` or `<workspace>/ideas/<project>`),
 `MARGIN_TAB`, `MARGIN_FILE`, `MARGIN_DIFF_BASE`, `MARGIN_EDIT`, `MARGIN_PREVIEW` (a port),
-`MARGIN_SHELL` (a shell id, or `task:<id>`) and `MARGIN_NO_PUSH` (skip the notification prompt).
+`MARGIN_SHELL` (a shell id, or `task:<id>`), `MARGIN_SIDEBAR=hide` (start with the sidebar hidden) and `MARGIN_NO_PUSH` (skip the notification prompt).
 
 - [docs/architecture.md](docs/architecture.md): how it fits together, where state lives, a code map.
 - [docs/protocol.md](docs/protocol.md): the daemon's HTTP and WebSocket API.

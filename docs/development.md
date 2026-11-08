@@ -39,6 +39,16 @@ built.
    (`MARGIN_OPEN`, `MARGIN_TAB`, … in the README) opens any screen directly,
    and `xcrun simctl io <device> screenshot` captures it.
 
+   **iPhone Duo** needs its own simulator runtime (Xcode › Settings ›
+   Components; it shows up as `iOS-27-2-iPhone19-4`, and the plain iOS
+   runtime refuses the device), then
+   `xcrun simctl create "iPhone Duo" com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4`.
+   Xcode 27 shows simulators in Device Hub (Xcode › Open Developer Tool) instead of
+   Simulator, with fold and rotate under Controls. The Duo has two displays:
+   screenshot with `--display=1` (folded) or `--display=3` (open). Xcode 27
+   also needs `xcodebuild -downloadComponent MetalToolchain` once before the app
+   builds.
+
 ## Before restarting the daemon
 
 A restart cuts off anything in flight: a turn Claude is working on, an approval
